@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-ssr/
+.vite/
+coverage/
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Herramientas descargadas (FFmpeg / yt-dlp): usar `npm run tools:fetch`
+src-tauri/binaries/
+src-tauri/resources/bin/
+
+# Logs y temporales
+*.log
+npm-debug.log*
+.env
+.env.*
+!.env.example
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
