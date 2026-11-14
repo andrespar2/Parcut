@@ -262,6 +262,61 @@ pub struct EnqueueRequest {
     pub clips: Vec<EnqueueClip>,
 }
 
+/// Elemento de la cola de publicación asistida por navegador.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistedItem {
+    pub id: String,
+    pub project_id: String,
+    pub clip_id: String,
+    pub project_name: String,
+    pub part_index: i64,
+    pub platform: String,
+    pub title: String,
+    pub description: String,
+    pub hashtags: Vec<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub remote_url: Option<String>,
+    pub sort_index: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub clip_path: String,
+}
+
+/// Instantánea de la cola asistida para la interfaz.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistedSnapshot {
+    pub items: Vec<AssistedItem>,
+    pub active_id: Option<String>,
+    pub paused: bool,
+    pub published: i64,
+    pub pending: i64,
+    pub failed: i64,
+    pub canceled: i64,
+}
+
+/// Elemento a encolar para publicación asistida.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistedClipInput {
+    pub clip_id: String,
+    pub title: String,
+    pub description: String,
+    pub hashtags: Vec<String>,
+}
+
+/// Petición de publicación asistida por navegador.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistedRequest {
+    pub project_id: String,
+    pub platform: String,
+    pub clips: Vec<AssistedClipInput>,
+}
+
 /// Entrada del registro de actividad local.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,3 +1,4 @@
+use crate::browser::{protection::ProtectionState, BrowserRuntime};
 use crate::error::{fail, AppError, AppResult};
 use crate::paths::{AppPaths, Tools};
 use crate::settings::Settings;
@@ -14,8 +15,12 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[derive(Default)]
-pub struct QueueRuntime {
-    pub running: AtomicBool,
+pub struct AssistedRuntime {
+    pub paused: AtomicBool,
+}
+
+#[derive(Default)]
+pub struct QueueRuntime {    pub running: AtomicBool,
     pub paused: AtomicBool,
     pub active_item: Mutex<Option<String>>,
     pub active_cancel: Mutex<Option<Arc<AtomicBool>>>,
@@ -47,6 +52,9 @@ pub struct AppState {
     pub split_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub download_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub pending_oauth: Mutex<HashMap<String, PendingOAuth>>,
+    pub browser: BrowserRuntime,
+    pub protection: ProtectionState,
+    pub assisted: AssistedRuntime,
     pub queue: QueueRuntime,
     pub http: reqwest::Client,
 }
@@ -68,6 +76,10 @@ impl AppState {
             .connect_timeout(std::time::Duration::from_secs(20))
             .build()
             .unwrap_or_default();
+        let protection = ProtectionState::new(
+            settings.web_protection_enabled,
+            settings.web_protection_level.clone(),
+        );
         Self {
             paths,
             db: Mutex::new(db),
@@ -76,6 +88,9 @@ impl AppState {
             split_cancels: Mutex::new(HashMap::new()),
             download_cancels: Mutex::new(HashMap::new()),
             pending_oauth: Mutex::new(HashMap::new()),
+            browser: BrowserRuntime::default(),
+            protection,
+            assisted: AssistedRuntime::default(),
             queue: QueueRuntime::default(),
             http,
         }

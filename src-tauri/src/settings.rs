@@ -21,6 +21,11 @@ pub struct Settings {
     pub tiktok_client_key: String,
     pub tiktok_privacy_level: String,
     pub default_privacy: String,
+    pub browser_keep_session: bool,
+    pub web_protection_enabled: bool,
+    pub web_protection_level: String,
+    pub browser_download_dir: String,
+    pub browser_auto_open_downloads: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +46,11 @@ impl Default for Settings {
             tiktok_client_key: String::new(),
             tiktok_privacy_level: "SELF_ONLY".into(),
             default_privacy: "private".into(),
+            browser_keep_session: true,
+            web_protection_enabled: true,
+            web_protection_level: "standard".into(),
+            browser_download_dir: String::new(),
+            browser_auto_open_downloads: false,
         }
     }
 }
@@ -111,6 +121,14 @@ impl Settings {
         }
         if !self.youtube_category_id.chars().all(|c| c.is_ascii_digit()) {
             self.youtube_category_id = "22".into();
+        }
+        if !matches!(self.web_protection_level.as_str(), "standard" | "intensive") {
+            self.web_protection_level = "standard".into();
+        }
+        if !self.browser_download_dir.trim().is_empty() {
+            let dir = PathBuf::from(self.browser_download_dir.trim());
+            std::fs::create_dir_all(&dir)?;
+            self.browser_download_dir = dir.display().to_string();
         }
         Ok(())
     }

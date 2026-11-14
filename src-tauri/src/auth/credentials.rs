@@ -28,7 +28,7 @@ fn protect_bytes(data: &[u8]) -> AppResult<Vec<u8>> {
         .map_err(|e| AppError(format!("No se pudo cifrar el secreto con Windows DPAPI: {e}")))?;
         let slice = std::slice::from_raw_parts(output.pbData, output.cbData as usize);
         let result = slice.to_vec();
-        let _ = LocalFree(HLOCAL(output.pbData as *mut core::ffi::c_void));
+        let _ = LocalFree(Some(HLOCAL(output.pbData as *mut core::ffi::c_void)));
         Ok(result)
     }
 }
@@ -62,7 +62,7 @@ fn unprotect_bytes(data: &[u8]) -> AppResult<Vec<u8>> {
         })?;
         let slice = std::slice::from_raw_parts(output.pbData, output.cbData as usize);
         let result = slice.to_vec();
-        let _ = LocalFree(HLOCAL(output.pbData as *mut core::ffi::c_void));
+        let _ = LocalFree(Some(HLOCAL(output.pbData as *mut core::ffi::c_void)));
         Ok(result)
     }
 }

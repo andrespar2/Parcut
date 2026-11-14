@@ -95,6 +95,33 @@ CREATE TABLE IF NOT EXISTS activity (
   detail TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS browser_sites (
+  profile TEXT NOT NULL,
+  host TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (profile, host)
+);
+
+CREATE TABLE IF NOT EXISTS assisted_queue (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  clip_id TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  part_index INTEGER NOT NULL,
+  platform TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  hashtags TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT,
+  remote_url TEXT,
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assisted_order ON assisted_queue(status, part_index, sort_index);
 "#;
 
 pub fn init(path: &Path) -> AppResult<Connection> {
@@ -237,6 +264,7 @@ pub fn list_projects(conn: &Connection) -> AppResult<Vec<Project>> {
 pub fn delete_project(conn: &Connection, id: &str) -> AppResult<()> {
     conn.execute("DELETE FROM clips WHERE project_id = ?1", params![id])?;
     conn.execute("DELETE FROM publish_queue WHERE project_id = ?1", params![id])?;
+    conn.execute("DELETE FROM assisted_queue WHERE project_id = ?1", params![id])?;
     conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -301,6 +329,7 @@ pub fn get_clip(conn: &Connection, id: &str) -> AppResult<Option<Clip>> {
 pub fn delete_clip(conn: &Connection, id: &str) -> AppResult<()> {
     conn.execute("DELETE FROM clips WHERE id = ?1", params![id])?;
     conn.execute("DELETE FROM publish_queue WHERE clip_id = ?1", params![id])?;
+    conn.execute("DELETE FROM assisted_queue WHERE clip_id = ?1", params![id])?;
     Ok(())
 }
 
@@ -612,6 +641,188 @@ pub fn recent_activity(conn: &Connection, limit: i64) -> AppResult<Vec<ActivityE
     Ok(out)
 }
 
+pub fn list_browser_sites(conn: &Connection) -> AppResult<Vec<(String, String, bool)>> {
+    let mut stmt = conn.prepare("SELECT profile, host, enabled FROM browser_sites ORDER BY profile, host")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)? != 0,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn set_browser_site(conn: &Connection, profile: &str, host: &str, enabled: bool) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO browser_sites (profile, host, enabled, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(profile, host) DO UPDATE SET enabled=?3, updated_at=?4",
+        params![profile, host, if enabled { 1 } else { 0 }, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn delete_browser_site(conn: &Connection, profile: &str, host: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM browser_sites WHERE profile = ?1 AND host = ?2",
+        params![profile, host],
+    )?;
+    Ok(())
+}
+
+fn assisted_from_row(row: &Row<'_>) -> rusqlite::Result<AssistedItem> {
+    Ok(AssistedItem {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        clip_id: row.get("clip_id")?,
+        project_name: row.get("project_name")?,
+        part_index: row.get("part_index")?,
+        platform: row.get("platform")?,
+        title: row.get("title")?,
+        description: row.get("description")?,
+        hashtags: tags_from_json(&row.get::<_, String>("hashtags")?),
+        status: row.get("status")?,
+        error: row.get("error")?,
+        remote_url: row.get("remote_url")?,
+        sort_index: row.get("sort_index")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+        clip_path: String::new(),
+    })
+}
+
+pub fn insert_assisted_item(conn: &Connection, item: &AssistedItem) -> AppResult<()> {
+    conn.execute(
+        r#"INSERT INTO assisted_queue (id, project_id, clip_id, project_name, part_index, platform,
+            title, description, hashtags, status, error, remote_url, sort_index, created_at, updated_at)
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending',NULL,NULL,?10,?11,?12)"#,
+        params![
+            item.id,
+            item.project_id,
+            item.clip_id,
+            item.project_name,
+            item.part_index,
+            item.platform,
+            item.title,
+            item.description,
+            tags_to_json(&item.hashtags),
+            item.sort_index,
+            item.created_at,
+            item.updated_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn list_assisted_items(conn: &Connection) -> AppResult<Vec<AssistedItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM assisted_queue ORDER BY sort_index ASC, part_index ASC, created_at ASC",
+    )?;
+    let rows = stmt.query_map([], assisted_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn get_assisted_item(conn: &Connection, id: &str) -> AppResult<Option<AssistedItem>> {
+    let mut stmt = conn.prepare("SELECT * FROM assisted_queue WHERE id = ?1")?;
+    Ok(stmt.query_row(params![id], assisted_from_row).optional()?)
+}
+
+pub fn next_assisted_item(conn: &Connection) -> AppResult<Option<AssistedItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM assisted_queue WHERE status = 'pending' ORDER BY part_index ASC, sort_index ASC LIMIT 1",
+    )?;
+    Ok(stmt.query_row([], assisted_from_row).optional()?)
+}
+
+pub fn active_assisted_item(conn: &Connection) -> AppResult<Option<AssistedItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM assisted_queue WHERE status IN ('preparing','waiting') ORDER BY part_index ASC, sort_index ASC LIMIT 1",
+    )?;
+    Ok(stmt.query_row([], assisted_from_row).optional()?)
+}
+
+pub fn set_assisted_status(conn: &Connection, id: &str, status: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE assisted_queue SET status=?2, updated_at=?3 WHERE id=?1",
+        params![id, status, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn set_assisted_error(conn: &Connection, id: &str, error: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE assisted_queue SET status='error', error=?2, updated_at=?3 WHERE id=?1",
+        params![id, error, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn set_assisted_published(conn: &Connection, id: &str, remote_url: Option<&str>) -> AppResult<()> {
+    conn.execute(
+        "UPDATE assisted_queue SET status='published', error=NULL, remote_url=?2, updated_at=?3 WHERE id=?1",
+        params![id, remote_url, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn reset_assisted_item(conn: &Connection, id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE assisted_queue SET status='pending', error=NULL, remote_url=NULL, updated_at=?2 WHERE id=?1",
+        params![id, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn cancel_pending_assisted(conn: &Connection) -> AppResult<usize> {
+    let changed = conn.execute(
+        "UPDATE assisted_queue SET status='canceled', updated_at=?1
+         WHERE status IN ('pending','preparing','waiting')",
+        params![now_iso()],
+    )?;
+    Ok(changed)
+}
+
+pub fn recover_assisted_queue(conn: &Connection) -> AppResult<usize> {
+    let changed = conn.execute(
+        "UPDATE assisted_queue SET status='waiting', updated_at=?1 WHERE status='preparing'",
+        params![now_iso()],
+    )?;
+    Ok(changed)
+}
+
+pub fn assisted_counts(conn: &Connection) -> AppResult<(i64, i64, i64, i64)> {
+    let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM assisted_queue GROUP BY status")?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    let mut published = 0;
+    let mut pending = 0;
+    let mut failed = 0;
+    let mut canceled = 0;
+    for row in rows {
+        let (status, count) = row?;
+        match status.as_str() {
+            "published" => published += count,
+            "pending" | "preparing" | "waiting" => pending += count,
+            "error" => failed += count,
+            "canceled" => canceled += count,
+            _ => {}
+        }
+    }
+    Ok((published, pending, failed, canceled))
+}
+
+pub fn assisted_max_sort_index(conn: &Connection) -> AppResult<i64> {
+    let value: Option<i64> = conn.query_row("SELECT MAX(sort_index) FROM assisted_queue", [], |row| row.get(0))?;
+    Ok(value.unwrap_or(0))
+}
+
 #[cfg(test)]
 pub fn insert_queue_item_at_end(conn: &Connection, item: &QueueItem) -> AppResult<i64> {
     let sort = queue_max_sort_index(conn)? + 1;
@@ -730,5 +941,66 @@ mod tests {
         set_queue_status(&conn, &first.id, "published").unwrap();
         let second = next_pending_queue_item(&conn).unwrap().unwrap();
         assert_eq!(second.part_index, 1);
+    }
+
+    fn assisted_item(id: &str, part: i64, sort: i64) -> AssistedItem {
+        AssistedItem {
+            id: id.into(),
+            project_id: "p1".into(),
+            clip_id: format!("c{part}"),
+            project_name: "Proyecto".into(),
+            part_index: part,
+            platform: "youtube".into(),
+            title: format!("Proyecto - PARTE {part}"),
+            description: String::new(),
+            hashtags: vec![],
+            status: "pending".into(),
+            error: None,
+            remote_url: None,
+            sort_index: sort,
+            created_at: now_iso(),
+            updated_at: now_iso(),
+            clip_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn assisted_queue_keeps_ascending_part_order() {
+        let conn = init_memory().unwrap();
+        for (id, part, sort) in [("a3", 3, 3), ("a1", 1, 1), ("a2", 2, 2)] {
+            insert_assisted_item(&conn, &assisted_item(id, part, sort)).unwrap();
+        }
+        assert_eq!(next_assisted_item(&conn).unwrap().unwrap().part_index, 1);
+        assert_eq!(assisted_max_sort_index(&conn).unwrap(), 3);
+        assert_eq!(list_assisted_items(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn assisted_queue_recovers_and_cancels() {
+        let conn = init_memory().unwrap();
+        insert_assisted_item(&conn, &assisted_item("a1", 1, 1)).unwrap();
+        insert_assisted_item(&conn, &assisted_item("a2", 2, 2)).unwrap();
+        set_assisted_status(&conn, "a1", "preparing").unwrap();
+        assert_eq!(recover_assisted_queue(&conn).unwrap(), 1);
+        let active = active_assisted_item(&conn).unwrap().unwrap();
+        assert_eq!(active.id, "a1");
+        assert_eq!(active.status, "waiting");
+
+        set_assisted_published(&conn, "a1", Some("https://example.com/v")).unwrap();
+        let (published, pending, failed, canceled) = assisted_counts(&conn).unwrap();
+        assert_eq!((published, pending, failed, canceled), (1, 1, 0, 0));
+
+        assert_eq!(cancel_pending_assisted(&conn).unwrap(), 1);
+        let (published, pending, _, canceled) = assisted_counts(&conn).unwrap();
+        assert_eq!((published, pending, canceled), (1, 0, 1));
+    }
+
+    #[test]
+    fn deleting_project_removes_assisted_items() {
+        let conn = init_memory().unwrap();
+        insert_project(&conn, &sample_project("p1")).unwrap();
+        insert_assisted_item(&conn, &assisted_item("a1", 1, 1)).unwrap();
+        delete_project(&conn, "p1").unwrap();
+        assert!(list_assisted_items(&conn).unwrap().is_empty());
     }
 }

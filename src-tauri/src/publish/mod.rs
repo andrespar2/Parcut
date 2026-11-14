@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub mod queue;
 pub mod title;
 pub mod upload;
+pub mod assisted;
 
 /// Datos ya adaptados a la plataforma que se van a publicar.
 #[derive(Debug, Clone)]

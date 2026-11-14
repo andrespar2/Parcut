@@ -1,4 +1,5 @@
 mod auth;
+mod browser;
 mod cleanup;
 mod commands;
 mod db;
@@ -57,7 +58,10 @@ pub fn run() {
                         None,
                     );
                 }
+                let _ = db::recover_assisted_queue(&db);
             }
+            publish::assisted::init(&handle);
+            browser::protection::init(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -84,6 +88,36 @@ pub fn run() {
             commands::download_metadata,
             commands::download_start,
             commands::download_cancel,
+            commands::browser_snapshot,
+            commands::browser_open,
+            commands::browser_hide,
+            commands::browser_set_bounds,
+            commands::browser_activate,
+            commands::browser_new_tab,
+            commands::browser_close_tab,
+            commands::browser_navigate,
+            commands::browser_action,
+            commands::browser_open_platform,
+            commands::browser_clear_data,
+            commands::browser_protection_status,
+            commands::browser_protection_set,
+            commands::browser_protection_level,
+            commands::browser_update_lists,
+            commands::browser_site_set,
+            commands::browser_site_remove,
+            commands::browser_open_external,
+            commands::browser_purge_sessions,
+            commands::browser_open_downloads,
+            commands::assisted_snapshot,
+            commands::assisted_enqueue,
+            commands::assisted_start,
+            commands::assisted_pause,
+            commands::assisted_cancel_remaining,
+            commands::assisted_confirm,
+            commands::assisted_fail,
+            commands::assisted_retry,
+            commands::assisted_reload,
+            commands::assisted_active,
             commands::platform_statuses,
             commands::accounts_list,
             commands::oauth_connect,

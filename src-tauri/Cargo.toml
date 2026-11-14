@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
@@ -25,7 +25,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 thiserror = "2"
-windows = { version = "0.58", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows = { version = "0.62", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_Storage_FileSystem"] }
+webview2-com = "0.39"
+adblock = "0.13.5"
+http = "1"
 base64 = "0.22"
 sha2 = "0.10"
 rand = "0.8"
