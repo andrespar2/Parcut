@@ -130,6 +130,20 @@ proceso separado y no se enlaza estáticamente.
 Se distribuye el ejecutable oficial sin modificaciones. No impone obligaciones de atribución,
 pero se acredita en README y en esta documentación.
 
+### Navegador y Protección web
+
+- **WebView2**: motor de navegación de Microsoft, presente en Windows 10/11. ParCut no lo
+  redistribuye ni lo modifica.
+- **`adblock-rust`** (MPL-2.0): motor de filtros de red usado para la Protección web de ParCut. La
+  licencia MPL-2.0 permite su uso en un producto mayor; si se modifica el crate, esas
+  modificaciones deben publicarse bajo la misma licencia. ParCut no lo modifica.
+- **EasyList** y **EasyPrivacy** (CC BY-SA 3.0 / GPLv3) y **Peter Lowe's list** (uso libre con
+  atribución): se **descargan en el equipo del usuario** en tiempo de ejecución y no se incluyen
+  en el instalador, por lo que no se redistribuyen. Las URL y la licencia se muestran en la propia
+  interfaz.
+
+Detalle completo en [`BROWSER.md`](BROWSER.md#8-licencias-y-atribuciones).
+
 ### Dependencias Rust y JavaScript
 
 Tauri, React, rusqlite, reqwest, tokio y el resto de crates/paquetes usan licencias MIT,
@@ -139,15 +153,16 @@ herramienta de cumplimiento.
 
 ## 8. Verificación del ejecutable
 
-Resultados de la compilación verificada (v1.1.0):
+Resultados de la compilación verificada (v1.2.0):
 
-- `parcut.exe`: 16,4 MB.
-- Instalador NSIS: 80,5 MiB.
+- `parcut.exe`: 19,3 MB (incluye el motor de bloqueo `adblock-rust` y `webview2-com`).
+- Instalador NSIS: 81,4 MiB.
+- SHA-256 del instalador: `ca575a47490f0dffec3155c5bbbf7188cb45248eada8bcddf47614d34d6fcea6`.
 - Instalación silenciosa con `/S /D=<carpeta>`: correcta.
 - El ejecutable instalado detectó FFmpeg, FFprobe y yt-dlp desde su carpeta de instalación.
 - Desinstalación con `uninstall.exe /S`: eliminó la carpeta de instalación.
 - Los datos de usuario (`%LOCALAPPDATA%\ParCut`) se conservan tras desinstalar; bórralos
-  manualmente si quieres eliminar proyectos y cuentas.
+  manualmente si quieres eliminar proyectos, cuentas y perfiles de navegador.
 
 Lista de comprobación antes de publicar:
 
@@ -158,9 +173,12 @@ Lista de comprobación antes de publicar:
 5. Comprobar que FFmpeg, FFprobe y yt-dlp aparecen como «Disponible» en Ajustes.
 6. Importar un video local, dividirlo y reproducir un clip.
 7. Verificar que las miniaturas y los clips persisten tras cerrar y abrir.
-8. Comprobar espacio usado, limpieza de temporales y eliminación completa de un proyecto.
-9. (Con credenciales) conectar una cuenta, publicar una parte y verificar el ID remoto.
-10. Desinstalar y confirmar que no quedan accesos directos ni servicios.
+8. Abrir el navegador, cargar las tres plataformas y comprobar que la Protección web bloquea.
+9. Iniciar sesión, cerrar y reabrir ParCut y comprobar que la sesión sigue activa.
+10. Preparar una cola asistida, confirmar una parte y comprobar que la siguiente no avanza sola.
+11. Comprobar espacio usado, limpieza de temporales y eliminación completa de un proyecto.
+12. (Con credenciales) conectar una cuenta, publicar una parte y verificar el ID remoto.
+13. Desinstalar y confirmar que no quedan accesos directos ni servicios.
 
 ## 9. Problemas conocidos del empaquetado
 

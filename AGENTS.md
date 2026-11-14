@@ -5,8 +5,10 @@ EDITAR SIEMPRE EL AGENTS.MD CON EL FIN DE MANTENER EL CONTEXTO DEL PROYECTO ACTU
 > **Desarrollado por: andrespar2**
 > Aplicación de escritorio para Windows 10/11 (x64) que importa o descarga videos, los divide
 > en clips por duración y los publica de forma secuencial en YouTube, Facebook y TikTok.
+> Incluye un navegador WebView2 con sesiones persistentes, Protección web propia y una cola de
+> publicación asistida que no requiere credenciales de desarrollador.
 
-**Versión actual:** 1.1.0 · **Repositorio:** https://github.com/andrespar2/Parcut
+**Versión actual:** 1.2.0 · **Repositorio:** https://github.com/andrespar2/Parcut
 
 ---
 
@@ -37,9 +39,13 @@ Flujo completo, sin datos simulados:
 4. **Gestionarlo**: cada proyecto guarda video fuente, clips, miniaturas y metadatos en su
    propio directorio administrado.
 5. **Publicarlo**: cola **estrictamente secuencial** que espera la confirmación real de la
-   plataforma antes de continuar.
-6. **Limpiarlo**: «Eliminar todo el proyecto» borra video, clips, miniaturas, temporales y
-   metadatos, verificando que ninguna ruta salga del espacio de ParCut.
+   plataforma antes de continuar (integración OAuth por API).
+6. **O publicarlo de forma asistida**: iniciar sesión en el navegador integrado y usar la cola
+   asistida, que abre la página oficial de subida, muestra los metadatos y espera la confirmación
+   del usuario parte por parte, sin credenciales de desarrollador.
+7. **Limpiarlo**: «Eliminar todo el proyecto» borra video, clips, miniaturas, temporales y
+   metadatos, verificando que ninguna ruta salga del espacio de ParCut. Las sesiones del navegador
+   nunca se tocan.
 
 Las integraciones sociales requieren credenciales de desarrollador propias; la interfaz lo
 indica y nunca finge una conexión.
@@ -51,6 +57,8 @@ indica y nunca finge una conexión.
 | Área | Tecnología | Motivo |
 |---|---|---|
 | Shell de escritorio | **Tauri 2** | Binario nativo pequeño, WebView2 en Windows 10/11, IPC tipado y NSIS. |
+| Navegador integrado | **WebView2 (child webviews)** | Motor real de Edge en pestañas dentro de la ventana; perfiles persistentes por plataforma. |
+| Bloqueo web | **adblock-rust 0.13** + EasyList/EasyPrivacy | Motor de filtros de Brave (MPL-2.0) con listas reconocidas y bloqueo nativo de red. |
 | UI | **React 19 + TypeScript + Vite 7** | Componentes reutilizables, HMR y tipado estricto. |
 | Estado | **Zustand** | Store mínimo sin boilerplate. |
 | Iconos | **lucide-react** | Iconografía minimalista coherente. |
@@ -69,6 +77,21 @@ indica y nunca finge una conexión.
   cuentas.
 - **Cola en Rust, no en el frontend**: sobrevive a recargas y cierres; un único trabajador evita
   publicaciones simultáneas.
+- **Navegador con WebView2 real**: pestañas creadas con `Window::add_child` (feature `unstable`)
+  sobre un área reservada de React; el chrome sigue siendo HTML y clicable. No se incrusta Brave
+  ni se distribuye Chromium.
+- **Un entorno WebView2 por perfil**: `CreateCoreWebView2EnvironmentWithOptions` con
+  `userDataFolder` propio permite varias pestañas del mismo perfil compartiendo cookies y aislar
+  plataformas entre sí. Los handles COM y el motor de filtros no son `Send`, así que viven en
+  `thread_local` del hilo principal y se serializan con `run_on_main_thread`.
+- **Perfiles persistentes fuera de SQLite**: `%LOCALAPPDATA%\ParCut\browser-profiles\{youtube,
+  facebook,tiktok}`. Nunca se leen ni exportan cookies; el borrado de proyectos no los toca.
+- **Bloqueo en la red, no en el DOM**: `WebResourceRequested` + respuesta `403` de WebView2 con
+  `adblock-rust`. Se excluyen navegaciones de documento y URLs de autenticación para no romper
+  inicios de sesión ni cargas de video; nada de inyección masiva de JavaScript.
+- **Cola asistida separada**: tabla `assisted_queue` independiente de `publish_queue` (OAuth).
+  Abre una sola página de subida, espera confirmación explícita del usuario y se pausa tras un
+  fallo; sin scraping, automatización de clics ni evasión de CAPTCHA.
 - **Dos modos de división**:
   - `copy`: `-c copy` + muxer `segment`. Rápido y sin pérdida; solo para el video completo.
   - `precise`: un proceso por parte con `-ss/-t` y recodificación H.264/AAC (CRF 20), para
@@ -111,7 +134,7 @@ Parcut/
 │  ├─ lib/{api.ts,format.ts,format.test.ts}
 │  ├─ store/app.ts
 │  ├─ components/{Sidebar,TopBar,Toasts,ui,PlatformLogo,ProjectCard,ClipCard,PlayerModal}.tsx
-│  └─ pages/{HomePage,NewProjectPage,ProjectPage,ClipsPage,PublishPage,AccountsPage,SettingsPage}.tsx
+│  └─ pages/{HomePage,NewProjectPage,ProjectPage,ClipsPage,PublishPage,AccountsPage,BrowserPage,SettingsPage}.tsx
 └─ src-tauri/
    ├─ Cargo.toml · tauri.conf.json · capabilities/default.json · build.rs
    ├─ binaries/{ffmpeg/*, yt-dlp.exe}      # gitignored, vía npm run tools:fetch
@@ -119,14 +142,20 @@ Parcut/
    └─ src/
       ├─ lib.rs · main.rs · state.rs · error.rs · models.rs · db.rs
       ├─ settings.rs · paths.rs · utils.rs · cleanup.rs
-      ├─ commands/{mod,system,projects,accounts,publish}.rs
+      ├─ commands/{mod,system,projects,accounts,publish,browser,assisted}.rs
       ├─ media/{mod,ffmpeg,ffprobe,thumbnail,split}.rs
       ├─ download/{mod,ytdlp}.rs
       ├─ projects/mod.rs
+      ├─ browser/{mod,runtime,profiles,protection}.rs
+      ├─ browser/filters/baseline.txt
       ├─ auth/{mod,credentials,oauth}.rs
-      └─ publish/{mod,title,upload,queue}.rs
+      └─ publish/{mod,title,upload,queue,assisted}.rs
          publish/platforms/{mod? no, declarado inline,youtube,facebook,tiktok}.rs
 ```
+
+> También existe `docs/BROWSER.md` (arquitectura del navegador) y las capturas
+> `docs/screenshots/browser*.png`, `publish-assisted.png`, `settings-browser.png` y
+> `clips-publish-modal.png`.
 
 > Nota: `publish/platforms` se declara como módulo inline en `publish/mod.rs`; no existe
 > `platforms/mod.rs`.
@@ -143,10 +172,13 @@ Registrados en `src-tauri/src/lib.rs`; envueltos tipados en `src/lib/api.ts`.
 | Proyectos | `projects_list`, `project_get`, `project_update`, `project_import`, `clips_list`, `clip_delete`, `split_plan`, `split_start`, `split_cancel` |
 | Descargas | `download_metadata`, `download_start`, `download_cancel` |
 | Cuentas | `platform_statuses`, `accounts_list`, `oauth_connect`, `oauth_start_manual`, `oauth_complete_manual`, `account_disconnect`, `platform_save_credentials`, `platform_clear_credentials` |
-| Publicación | `queue_snapshot`, `queue_enqueue`, `queue_start`, `queue_pause`, `queue_cancel_remaining`, `queue_retry`, `queue_cancel_item` |
+| Navegador | `browser_snapshot`, `browser_open`, `browser_hide`, `browser_set_bounds`, `browser_activate`, `browser_new_tab`, `browser_close_tab`, `browser_navigate`, `browser_action`, `browser_open_platform`, `browser_clear_data`, `browser_protection_status`, `browser_protection_set`, `browser_protection_level`, `browser_update_lists`, `browser_site_set`, `browser_site_remove`, `browser_open_external`, `browser_purge_sessions`, `browser_open_downloads` |
+| Publicación asistida | `assisted_snapshot`, `assisted_enqueue`, `assisted_start`, `assisted_pause`, `assisted_cancel_remaining`, `assisted_confirm`, `assisted_fail`, `assisted_retry`, `assisted_reload`, `assisted_active` |
+| Publicación (API) | `queue_snapshot`, `queue_enqueue`, `queue_start`, `queue_pause`, `queue_cancel_remaining`, `queue_retry`, `queue_cancel_item` |
 
 Eventos: `toast`, `import:progress`, `download:progress|done|error`, `split:start|progress|clip|done|error|notice`,
-`project:updated`, `clips:changed`, `accounts:changed`, `queue:changed|progress|finished`.
+`project:updated`, `clips:changed`, `accounts:changed`, `queue:changed|progress|finished`,
+`browser:changed|notice|protection|download`, `assisted:changed`.
 
 ---
 
@@ -165,10 +197,19 @@ Eventos: `toast`, `import:progress`, `download:progress|done|error`, `split:star
 - `publish_queue(id, project_id, clip_id, part_index, platform, account_id, title, description,
   hashtags, status, progress, remote_id, remote_url, error, attempts, resume_data, sort_index,
   created_at, updated_at)`
+- `assisted_queue(id, project_id, clip_id, project_name, part_index, platform, title, description,
+  hashtags, status, error, remote_url, sort_index, created_at, updated_at)`
+- `browser_sites(profile, host, enabled, updated_at)` — excepciones de la Protección web.
 - `activity(id, level, message, detail, created_at)`
 
-Estados de cola: `pending`, `preparing`, `uploading`, `published`, `error`, `canceled`.
+Estados de cola API: `pending`, `preparing`, `uploading`, `published`, `error`, `canceled`.
 `resume_data` contiene JSON cifrado en base64url.
+
+Estados de la cola asistida: `pending`, `preparing`, `waiting`, `published`, `error`, `canceled`.
+
+**Sesiones del navegador**: no están en SQLite. Viven en
+`%LOCALAPPDATA%\ParCut\browser-profiles\{youtube,facebook,tiktok}` (perfiles WebView2). ParCut no
+lee, exporta ni registra cookies.
 
 ---
 
@@ -189,6 +230,16 @@ Estados de cola: `pending`, `preparing`, `uploading`, `published`, `error`, `can
 - Adaptadores reales: YouTube Resumable, Facebook Page Resumable, TikTok Content Posting.
 - Cola secuencial persistente: pausa, reanudar, reintentar, cancelar, progreso, estados reales,
   recuperación tras cierre y protección contra duplicados.
+- **Navegador integrado WebView2**: pestañas por plataforma, barra de direcciones, seguridad,
+  atrás/adelante/recargar/inicio, accesos a YouTube Studio/Facebook/TikTok Studio, descargas
+  controladas y apertura en el navegador del sistema.
+- **Sesiones persistentes por plataforma** en `browser-profiles` (cookies y `localStorage`),
+  «Mantener sesión iniciada» y limpieza independiente de sesión, caché o perfil completo.
+- **Protección web de ParCut** con `adblock-rust`, EasyList/EasyPrivacy/Peter Lowe, niveles
+  estándar e intensiva, contador real de bloqueos, actualización de listas y excepciones por sitio.
+- **Publicación asistida**: selección de clips, títulos/descripción/hashtags, cola persistente en
+  SQLite, una parte a la vez con confirmación del usuario, pausa, reanudación, reintento,
+  cancelación y recuperación tras cierre.
 - Títulos `NOMBRE - PARTE N`, hashtags generales/individuales y límites por plataforma.
 - Eliminación completa con informe (archivos, bytes, advertencias, verificación).
 - Cambio de directorio de almacenamiento con migración real de proyectos y rutas.
@@ -197,7 +248,13 @@ Estados de cola: `pending`, `preparing`, `uploading`, `published`, `error`, `can
 - Instalador NSIS generado, instalado, ejecutado y desinstalado correctamente (ver §8).
 
 ### Dependen de terceros (documentadas, no bloquean el resto)
-- Credenciales de Google Cloud, Meta y TikTok + revisión de permisos.
+- Credenciales de Google Cloud, Meta y TikTok + revisión de permisos (solo para la publicación por
+  API; el navegador y la cola asistida no las necesitan).
+- **Inicio de sesión dentro de WebView2**: Google puede rechazarlo por política de navegadores
+  integrados; la interfaz ofrece abrir la página en el navegador del sistema y no intenta evadir
+  la restricción. Facebook y TikTok lo permiten habitualmente.
+- **Duración de las sesiones**: dependen de cada plataforma; pueden caducar o revocarse aunque el
+  perfil se conserve.
 - Firma de código del instalador (certificado del propietario).
 - Publicación pública en TikTok (auditoría de la app).
 - Traducciones a otros idiomas (textos en español, estructura preparada).
@@ -226,17 +283,41 @@ rustup-init.exe -y --default-toolchain stable --profile minimal --no-modify-path
 
 y se añadió `%USERPROFILE%\.cargo\bin` al `PATH` de la sesión.
 
+### Depuración del navegador
+
+El navegador usa WebView2. Para inspeccionarlo durante el desarrollo:
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+npm run tauri:dev
+# luego abre http://127.0.0.1:9222
+```
+
+Cada perfil crea su propio proceso de WebView2, por lo que ese puerto solo expone el entorno que
+lo obtiene primero. No actives esta opción en producción. Las pruebas E2E de esta versión se
+hicieron con el puerto activo y una página local que escribe cookies y `localStorage` para
+comprobar la persistencia.
+
 ---
 
 ## 8. Pruebas y resultados
 
 | Prueba | Comando | Resultado |
 |---|---|---|
-| Typecheck + build frontend | `npm run build` | OK (1.701 módulos, ~353 kB JS / 28 kB CSS) |
+| Typecheck + build frontend | `npm run build` | OK (1.702 módulos, ~403 kB JS / 35 kB CSS) |
 | Unitarias frontend | `npm test` | 10/10 OK |
-| Unitarias backend | `cargo test --lib` | 39/39 OK, sin avisos de compilación |
+| Unitarias backend | `cargo test --lib` | 53/53 OK |
 | Compilación backend | `cargo check` | OK, 0 avisos |
-| Build release + instalador | `npm run tauri:build` | OK: `parcut.exe` ~16,4 MB y `ParCut_1.1.0_x64-setup.exe` ~80,5 MiB |
+| Build release + instalador | `npm run tauri:build` | OK: `parcut.exe` ~19,3 MB y `ParCut_1.2.0_x64-setup.exe` ~81,4 MiB |
+| Navegador: apertura, pestañas, perfiles, protección | UI + CDP | OK (35 comprobaciones, 6,5 s la primera apertura) |
+| Navegador: cookies y `localStorage` por perfil | UI + CDP + página de prueba local | OK |
+| Navegador: borrar sesión de YouTube no afecta a Facebook | UI + CDP | OK |
+| Navegador: excepción por sitio y reactivación | UI + CDP | OK (contador 3 → 3 → 6) |
+| Navegador: esquemas peligrosos rechazados | UI + IPC | OK (`javascript:`, `data:`, `file:`) |
+| Navegador: persistencia tras reiniciar ParCut | UI + CDP | OK (15 comprobaciones) |
+| Publicación asistida: orden, confirmación, pausa, reintento | UI + CDP | OK (3 clips, 1 publicada, 2 pendientes) |
+| Publicación asistida: recuperación tras reinicio | UI + CDP | OK (parte 2 en `waiting`, cola en pausa) |
+| Borrar proyecto no borra sesiones | UI + IPC | OK (perfiles y cookie intactos) |
 | Recorte por rango (corte exacto) | UI | OK: rango 10–50 s, clips 15/15/10 s, inicios 10/25/40 |
 | Recorte desde el reproductor | UI | OK: marcar inicio/fin y «Usar video completo» |
 | Copy con rango personalizado | UI/IPC | Rechazado con mensaje que exige «Corte exacto» |
@@ -254,7 +335,10 @@ y se añadió `%USERPROFILE%\.cargo\bin` al `PATH` de la sesión.
 
 Pruebas unitarias relevantes: cobertura temporal exacta de los cortes, fusión del resto mínimo,
 límites de título por plataforma, hashtags sin duplicados, rechazo de URLs locales, contención de
-rutas con `..`, roundtrip DPAPI y orden de la cola.
+rutas con `..`, roundtrip DPAPI, orden de las dos colas, normalización estricta de dominios,
+normalización de URL del navegador (bloqueo de esquemas y búsqueda web), detección de plataformas,
+lista blanca de ventanas emergentes, excepciones por sitio con subdominios, omisión de URLs de
+autenticación y recuperación/cancelación de la cola asistida.
 
 ---
 
@@ -262,8 +346,9 @@ rutas con `..`, roundtrip DPAPI y orden de la cola.
 
 Ver `docs/BUILD.md`. Salidas verificadas:
 
-- `src-tauri/target/release/parcut.exe` — 16,4 MB.
-- `src-tauri/target/release/bundle/nsis/ParCut_1.1.0_x64-setup.exe` — 80,5 MiB.
+- `src-tauri/target/release/parcut.exe` — 19,3 MB.
+- `src-tauri/target/release/bundle/nsis/ParCut_1.2.0_x64-setup.exe` — 81,4 MiB.
+- SHA-256 del instalador 1.2.0: `ca575a47490f0dffec3155c5bbbf7188cb45248eada8bcddf47614d34d6fcea6`.
 
 Recursos empaquetados junto al ejecutable: `ffmpeg/` (ffmpeg.exe, ffprobe.exe, DLLs y
 LICENSE.txt) y `yt-dlp/yt-dlp.exe`. Los binarios **no** están en Git (`src-tauri/binaries/`
@@ -280,6 +365,11 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 - **FFmpeg/FFprobe**: GPLv3, build compartido de BtbN con `libx264`. Se ejecuta como proceso
   separado; se incluye `LICENSE.txt` y se ofrece el código fuente en `docs/BUILD.md`.
 - **yt-dlp**: Unlicense.
+- **adblock-rust**: MPL-2.0. Se usa como dependencia sin modificaciones.
+- **EasyList / EasyPrivacy**: CC BY-SA 3.0 / GPLv3. Se descargan en el equipo del usuario; el
+  instalador no las redistribuye.
+- **Peter Lowe's list**: uso libre con atribución (modo intensivo).
+- **WebView2**: componentes de Microsoft incluidos en Windows; ParCut no los redistribuye.
 - **Tauri/React/rusqlite/reqwest/etc.**: MIT/Apache-2.0/BSD.
 
 ---
@@ -304,6 +394,14 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 | 2026-11-14 | Cambiar el directorio de almacenamiento dejaba inaccesibles los proyectos anteriores. | Migración real de carpetas + reescritura transaccional de rutas con reversión ante fallos. |
 | 2026-11-14 | `tauri build` falló con «Acceso denegado» por el ejecutable abierto. | Cerrar la instancia de ParCut antes de recompilar. |
 | 2026-11-14 | En modo `copy`, un rango personalizado producía clips fuera del final elegido (los keyframes mandan). | Se exige «Corte exacto» para rangos personalizados; `copy` queda solo para el video completo. |
+| 2026-11-14 | Tauri no ofrece un `data_directory` por pestaña ni un manejador de red conectado en esta versión de wry. | Se crean entornos WebView2 propios por perfil con `CreateCoreWebView2EnvironmentWithOptions` y se registra `WebResourceRequested` nativo para el bloqueo. |
+| 2026-11-14 | Las interfaces COM y `adblock::Engine` no son `Send`/`Sync`. | Viven en `thread_local` del hilo principal; el motor se construye en un hilo aparte, se serializa y se deserializa en el principal. |
+| 2026-11-14 | Al montar la página del navegador, el WebView quedaba oculto por el doble efecto de React StrictMode (`browser_hide` llegaba después de `browser_open`). | Ocultación diferida 250 ms que se cancela al remontar y `browser_set_bounds` marca el navegador como visible. |
+| 2026-11-14 | Al ocultar el WebView, la zona del chrome quedaba en negro un instante hasta el siguiente repintado. | Se fuerza un repintado del contenedor tras abrir/cerrar paneles. |
+| 2026-11-14 | `normalize_host` aceptaba `https://ejemplo.com` como dominio y rechazaba IP locales. | Validación por etiquetas (TLD alfabético) y soporte explícito de IPv4 para excepciones por sitio. |
+| 2026-11-14 | Las pestañas mostraban el host y no el título real de la página. | Se usa `on_document_title_changed` y se conserva el host solo mientras carga. |
+| 2026-11-14 | La primera apertura del navegador tardaba ~6-11 s por crear tres entornos WebView2. | Se muestra un indicador de carga y los entornos se reutilizan durante toda la sesión. |
+| 2026-11-14 | El SQLite de cookies de WebView2 está bloqueado en exclusiva mientras la app corre. | Las pruebas de sesión se hicieron con una página local que expone cookie y `localStorage` en el título, no leyendo el archivo. |
 
 ---
 
@@ -312,6 +410,9 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 - Rust: `snake_case`, errores con `AppError`, comandos `#[tauri::command] -> Result<T, AppError>`.
 - TypeScript: componentes funcionales, props tipadas, sin `any`; utilidades puras en `lib/`.
 - Nombres de archivo de clips: `parte-XXX.mp4`; miniaturas `parte-XXX.jpg`.
+- Perfiles de navegador: solo `youtube`, `facebook` y `tiktok`; carpeta
+  `browser-profiles/<perfil>` y validación de contención antes de borrar.
+- Ningún comando del navegador devuelve cookies, contraseñas ni tokens al frontend.
 - Títulos por defecto: `<NOMBRE> - PARTE <N>`.
 - Commits: Conventional Commits (`feat:`, `fix:`, `ui:`, `docs:`, `chore:`); nunca mencionar
   herramientas de asistencia.
@@ -320,6 +421,23 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 ---
 
 ## 13. Historial de cambios
+
+### 2026-11-14 — v1.2.0: navegador integrado, sesiones y publicación asistida
+- Navegador WebView2 real dentro de la ventana: pestañas por plataforma, barra de direcciones,
+  seguridad, accesos directos, descargas y apertura en el navegador del sistema.
+- Perfiles persistentes `browser-profiles/{youtube,facebook,tiktok}` con entorno WebView2 propio
+  por perfil, «Mantener sesión iniciada» y limpieza independiente (sesión, caché, perfil).
+- Protección web de ParCut con `adblock-rust`, EasyList/EasyPrivacy/Peter Lowe, niveles, contador,
+  actualización de listas y excepciones por sitio aplicadas con `WebResourceRequested` (403).
+- Cola de publicación asistida (`assisted_queue`): una parte a la vez, confirmación del usuario,
+  pausa, reanudación, reintento, cancelación y recuperación tras cierre.
+- Sección de navegador en Configuración, panel de configuración del navegador y barra de cola
+  asistida sobre el área de navegación.
+- Validación de URL y bloqueo de `javascript:`, `data:` y `file:`; ventanas emergentes limitadas;
+  descargas peligrosas bloqueadas; ninguna cookie se guarda en SQLite ni en logs.
+- Documentación `docs/BROWSER.md`, capturas nuevas y actualización de README/CHANGELOG/BUILD.
+- Pruebas: 53 unitarias de backend, 10 de frontend, 35 comprobaciones E2E del navegador y 15 de
+  persistencia/recuperación tras reiniciar.
 
 ### 2026-11-13 — Etapa 1: fundamentos
 - Inspección del repositorio (solo README, `main` limpio) y del entorno (Node 24, sin Rust,

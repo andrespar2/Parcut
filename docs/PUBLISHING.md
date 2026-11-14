@@ -1,5 +1,14 @@
 # Publicación en plataformas
 
+ParCut ofrece **dos modalidades independientes**:
+
+| Modalidad | Requisitos | Cómo funciona |
+|---|---|---|
+| **Publicación asistida por navegador** (recomendada para empezar) | Ninguno: solo iniciar sesión en el navegador integrado | ParCut abre la página oficial de subida, muestra los metadatos y espera tu confirmación parte por parte. Ver [`BROWSER.md`](BROWSER.md#5-publicación-asistida-desde-mis-clips). |
+| **Publicación por API (OAuth)** | Aplicación registrada en Google Cloud, Meta o TikTok | Subida automática con la API oficial, cola secuencial y reanudación. Se describe en este documento. |
+
+El resto de este documento se refiere a la modalidad por API.
+
 ParCut implementa los flujos oficiales de autorización y subida, pero **no incluye credenciales
 de terceros**. Cada propietario debe registrar su aplicación y, cuando corresponda, superar la
 revisión del proveedor. Sin esa configuración la interfaz muestra «falta configuración» y no

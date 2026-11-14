@@ -7,6 +7,10 @@ videos autorizados, los divide automáticamente en partes de la duración que el
 de forma **secuencial** en YouTube, Facebook y TikTok, una parte a la vez y con confirmación real
 de cada plataforma.
 
+Incluye un **navegador integrado** con sesiones persistentes por plataforma y **Protección web de
+ParCut** (bloqueo de anuncios y rastreadores), además de una **publicación asistida** que usa esas
+sesiones sin pedir credenciales de desarrollador.
+
 Desarrollado por **andrespar2**.
 
 ![Pantalla de inicio de ParCut](docs/screenshots/home.png)
@@ -29,6 +33,20 @@ Desarrollado por **andrespar2**.
 barra visual y marcas tomadas directamente del reproductor.
 
 ![Recorte por rango](docs/screenshots/project-range.png)
+
+**Navegador integrado:** sesiones independientes para YouTube, Facebook y TikTok, con barra de
+direcciones, pestañas y accesos directos a las páginas de subida.
+
+![Navegador integrado](docs/screenshots/browser.png)
+
+| Protección web de ParCut | Publicación asistida |
+|---|---|
+| ![Protección web](docs/screenshots/browser-protection.png) | ![Publicación asistida](docs/screenshots/publish-assisted.png) |
+
+**Configuración del navegador:** perfiles, espacio en disco, listas de filtros y limpieza
+independiente por plataforma.
+
+![Configuración del navegador](docs/screenshots/settings-browser.png)
 
 ---
 
@@ -55,7 +73,30 @@ barra visual y marcas tomadas directamente del reproductor.
 - Miniaturas automáticas, progreso real, cancelación segura y limpieza de archivos parciales.
 - Clips ordenados por número de parte y persistidos aunque cierres la aplicación.
 
-### Publicación
+### Navegador integrado
+- **WebView2 real** dentro de la ventana de ParCut, con pestañas, barra de direcciones, indicador
+  de seguridad y botones de atrás, adelante, recargar e inicio.
+- Accesos directos a **YouTube Studio**, **Facebook** y **TikTok Studio**.
+- **Sesiones persistentes** por plataforma en `%LOCALAPPDATA%\ParCut\browser-profiles`. Cada
+  plataforma conserva sus cookies y su `localStorage` al cerrar y reabrir ParCut.
+- Opción **Mantener sesión iniciada** (activada por defecto) y limpieza independiente: borrar
+  sesión, limpiar caché o eliminar el perfil completo, siempre con confirmación.
+- **Protección web de ParCut**: bloqueo de anuncios y rastreadores con `adblock-rust`, listas
+  EasyList/EasyPrivacy, nivel intensivo opcional, contador de bloqueos y excepciones por sitio.
+- Descargas controladas, bloqueo de ejecutables y botón para abrir la página actual en el
+  navegador del sistema.
+
+### Publicación asistida
+- Selecciona varios clips en **Mis clips** y elige **Publicar en redes sociales**.
+- Edita títulos (`NOMBRE DEL VIDEO - PARTE N`), descripción y hashtags antes de continuar.
+- ParCut abre la página oficial de subida con la sesión que ya tienes iniciada y muestra los
+  metadatos con un botón para copiarlos.
+- La cola es **ordenada y persistente**: una parte a la vez, y solo avanza cuando tú confirmas que
+  la publicación se completó. Incluye pausa, reanudación, reintento y cancelación.
+- No usa scraping, automatización de clics ni evasión de CAPTCHA; tampoco requiere credenciales
+  de desarrollador.
+
+### Publicación por API (opcional)
 - Cuentas vinculadas con OAuth 2.0 (PKCE + callback local) de YouTube, Facebook y TikTok.
 - Tokens cifrados con **Windows DPAPI**; nunca se guardan contraseñas ni secretos en texto plano.
 - Cola **estrictamente secuencial**: una publicación activa, espera la confirmación de la
@@ -83,6 +124,8 @@ barra visual y marcas tomadas directamente del reproductor.
 - Para usar el instalador: no se requieren dependencias adicionales; FFmpeg, FFprobe y yt-dlp
   se incluyen empaquetados.
 - Para desarrollo: Node.js 20+, Rust stable (MSVC), Microsoft C++ Build Tools y WebView2.
+- El navegador integrado usa **WebView2 Runtime** (incluido en Windows 11 y en la mayoría de
+  instalaciones de Windows 10; el instalador de ParCut lo requiere si falta).
 
 ---
 
@@ -90,7 +133,7 @@ barra visual y marcas tomadas directamente del reproductor.
 
 ### Instalador (usuario final)
 
-1. Descarga `ParCut_1.1.0_x64-setup.exe` desde la sección de releases.
+1. Descarga `ParCut_1.2.0_x64-setup.exe` desde la sección de releases.
 2. Ejecuta el instalador (instalación por usuario, sin privilegios de administrador).
 3. Abre ParCut desde el menú Inicio o el acceso directo del escritorio.
 
@@ -123,19 +166,27 @@ Consulta [`docs/BUILD.md`](docs/BUILD.md) para el detalle del empaquetado y las 
    Pulsa «Crear N clips». El último clip conserva el tiempo restante.
 3. **Revisa**: en el proyecto o en **Mis clips** puedes reproducir, abrir la ubicación, copiar el
    nombre o eliminar cada parte.
-4. **Conecta cuentas**: configura tus credenciales de desarrollador y autoriza las cuentas en
-   **Cuentas conectadas**.
-5. **Publica**: selecciona clips, plataforma y cuenta, revisa títulos y hashtags, añádelos a la
-   cola y pulsa **Iniciar cola**. ParCut publica la parte 1, espera la confirmación, continúa con
-   la parte 2 y así sucesivamente.
-6. **Limpia**: «Eliminar todo» borra el video, los clips, las miniaturas y los metadatos del
-   proyecto. También puedes mover la biblioteca a otra carpeta desde Ajustes: los proyectos se
-   migran y las rutas se actualizan automáticamente.
+4. **Inicia sesión en el navegador**: abre **Navegador**, entra en YouTube, Facebook o TikTok y
+   accede con tu cuenta. La sesión queda guardada en el perfil de esa plataforma.
 
-### Credenciales de plataformas
+   > Google puede rechazar el inicio de sesión dentro de navegadores integrados. Si ocurre, usa el
+   > botón **Abrir en el navegador del sistema**; ParCut no intenta evadir esa restricción. Las
+   > sesiones dependen de cada plataforma y pueden caducar o revocarse.
+5. **Publica de forma asistida**: en **Mis clips**, selecciona los clips y pulsa **Publicar en
+   redes sociales**. Elige plataforma, revisa títulos, descripción y hashtags, y añade la cola.
+   ParCut abre la página de subida, copia los metadatos con un clic y espera tu confirmación para
+   pasar a la siguiente parte.
+6. **Publica por API (opcional)**: si prefieres la integración oficial, configura tus credenciales
+   de desarrollador y autoriza las cuentas en **Cuentas conectadas**; después usa **Publicaciones**
+   y la cola automática.
+7. **Limpia**: «Eliminar todo» borra el video, los clips, las miniaturas y los metadatos del
+   proyecto, pero **nunca** las sesiones del navegador. También puedes mover la biblioteca a otra
+   carpeta desde Ajustes: los proyectos se migran y las rutas se actualizan automáticamente.
 
-ParCut implementa el flujo completo, pero **no incluye credenciales de terceros**. Cada
-plataforma exige registrar una aplicación propia:
+### Credenciales de plataformas (solo para la publicación por API)
+
+El navegador integrado y la publicación asistida **no necesitan credenciales de desarrollador**.
+Para la integración oficial por API, cada plataforma exige registrar una aplicación propia:
 
 | Plataforma | Requisito principal |
 |---|---|
@@ -154,6 +205,14 @@ indica y no simula la conexión.
 - Sin telemetría ni recopilación de datos personales.
 - Los tokens OAuth y los secretos de aplicación se cifran con DPAPI (ámbito del usuario de
   Windows) y se guardan en la base local.
+- **El navegador no guarda contraseñas ni cookies en la base de datos ni en los registros**: las
+  sesiones viven únicamente en los perfiles de WebView2 del equipo.
+- Cada plataforma usa un perfil de navegación separado; borrar una sesión no afecta a las demás ni
+  a los proyectos de video.
+- Se rechazan `javascript:`, `data:`, `file:` y otros esquemas peligrosos; las plataformas se
+  abren por HTTPS y la validación de certificados queda en manos de WebView2.
+- Las ventanas emergentes se limitan a dominios oficiales y las descargas de ejecutables o scripts
+  se bloquean.
 - Los procesos externos se ejecutan con argumentos separados y validados; nunca mediante una
   shell concatenada.
 - Las URL de descarga se validan (solo http/https, sin redes locales).
@@ -170,8 +229,11 @@ los términos de uso y los derechos de autor de cada plataforma. Si un sitio no 
 descarga, importa el archivo desde tu equipo.
 
 FFmpeg se distribuye como programa independiente bajo GPLv3 (build con `libx264`), con su texto
-de licencia y enlace al código fuente. yt-dlp se distribuye bajo Unlicense. El código de ParCut
-usa licencia MIT. Consulta [`docs/BUILD.md`](docs/BUILD.md#licencias-de-terceros).
+de licencia y enlace al código fuente. yt-dlp se distribuye bajo Unlicense. El motor de bloqueo
+`adblock-rust` usa licencia MPL-2.0; EasyList y EasyPrivacy (CC BY-SA 3.0 / GPLv3) se descargan en
+el equipo del usuario y no se incluyen en el instalador. El código de ParCut usa licencia MIT.
+Consulta [`docs/BUILD.md`](docs/BUILD.md#licencias-de-terceros) y
+[`docs/BROWSER.md`](docs/BROWSER.md#8-licencias-y-atribuciones).
 
 ---
 
@@ -179,8 +241,8 @@ usa licencia MIT. Consulta [`docs/BUILD.md`](docs/BUILD.md#licencias-de-terceros
 
 ```
 src/            Interfaz React + TypeScript (páginas, componentes, store, API tipada)
-src-tauri/      Backend Rust (comandos, SQLite, FFmpeg, OAuth, cola de publicación)
-docs/           Arquitectura, publicación por plataforma y compilación
+src-tauri/      Backend Rust (comandos, SQLite, FFmpeg, navegador WebView2, colas de publicación)
+docs/           Arquitectura, navegador, publicación por plataforma y compilación
 scripts/        Descarga de herramientas y generación de iconos
 ```
 

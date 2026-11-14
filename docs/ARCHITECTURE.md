@@ -35,12 +35,13 @@ Windows.
 | `src/db.rs` | Esquema SQLite, migraciones idempotentes y CRUD de proyectos, clips, cuentas, secretos, cola y actividad. |
 | `src/settings.rs` | Preferencias no sensibles en JSON, validación y escritura atómica. |
 | `src/state.rs` | Estado compartido: DB, settings, herramientas, cancelaciones, OAuth pendiente y runtime de la cola. |
-| `src/commands/` | Superficie IPC dividida por dominio (`projects`, `accounts`, `publish`, `system`). |
+| `src/commands/` | Superficie IPC dividida por dominio (`projects`, `accounts`, `publish`, `browser`, `assisted`, `system`). |
 | `src/projects/` | Creación de proyectos, importación local con progreso, análisis y portada. |
 | `src/media/` | Ejecución de FFmpeg con progreso/cancelación, FFprobe, miniaturas y planificación/ejecución de cortes. |
 | `src/download/ytdlp.rs` | Metadatos, selector de calidad validado y descarga con progreso. |
 | `src/auth/` | PKCE + callback local, canje/renovación de tokens y cifrado DPAPI. |
-| `src/publish/` | Límites de texto, cola secuencial y adaptadores de YouTube, Facebook y TikTok. |
+| `src/publish/` | Límites de texto, cola secuencial, adaptadores de YouTube, Facebook y TikTok y cola asistida (`assisted.rs`). |
+| `src/browser/` | Navegador WebView2: perfiles persistentes, pestañas, descargas, seguridad de URL y Protección web (`protection.rs`). |
 | `src/cleanup.rs` | Borrado completo de proyectos, clips, temporales y estadísticas de disco. |
 | `src/utils.rs` | Saneado de nombres, validación de URL, contención de rutas, hashtags y utilidades. |
 
@@ -55,7 +56,13 @@ Base: `%LOCALAPPDATA%\ParCut\parcut.db` (SQLite con WAL, claves foráneas activa
 | `accounts` | Cuenta vinculada + `token_blob` cifrado con DPAPI. Única por `(platform, external_id)`. |
 | `secrets` | Client secrets de aplicaciones, cifrados con DPAPI. |
 | `publish_queue` | Elementos de la cola, orden, estado, progreso, IDs remotos y `resume_data` cifrado. |
+| `assisted_queue` | Cola de publicación asistida por navegador: parte, plataforma, títulos, estado y error. |
+| `browser_sites` | Excepciones de la Protección web por perfil y dominio. |
 | `activity` | Registro local de eventos sin secretos. |
+
+Las sesiones del navegador **no** se guardan en SQLite: viven en los perfiles de WebView2
+(`%LOCALAPPDATA%\ParCut\browser-profiles\{youtube,facebook,tiktok}`) y se administran con las APIs
+de WebView2. Ningún comando lee, exporta ni registra cookies.
 
 Los archivos viven en `<storageDir>\projects\<projectId>\`:
 
@@ -120,6 +127,40 @@ fragmento seleccionado y el tamaño estimado se calcula proporcionalmente al ran
 El frontend recibe `queue:changed` (instantánea), `queue:progress` (porcentaje por elemento) y
 `queue:finished`.
 
+## 5.1 Cola de publicación asistida
+
+`src/publish/assisted.rs` gestiona una cola **independiente** de la anterior, pensada para el
+navegador integrado y sin credenciales de desarrollador:
+
+- tabla `assisted_queue`; orden por `part_index` y `sort_index`;
+- solo un elemento puede estar en `preparing`/`waiting`; el siguiente no se abre hasta que el
+  usuario confirma el anterior (`assisted_confirm`);
+- `waiting` significa que la página oficial de subida ya está abierta y ParCut espera al usuario;
+- `assisted_fail` registra el motivo, deja el elemento en `error` y pausa la cola;
+- `assisted_retry` devuelve un elemento con error o cancelado a `pending`;
+- al arrancar, `recover_assisted_queue` convierte los `preparing` interrumpidos en `waiting` y la
+  cola queda en pausa hasta que el usuario decida continuar;
+- el avance solo lo provoca una confirmación explícita: no hay scraping ni automatización.
+
+## 5.2 Navegador WebView2
+
+`src/browser/` crea pestañas reales con `Window::add_child` (característica `unstable` de Tauri).
+El estado no `Send` (interfaces COM, entornos por perfil y el motor `adblock::Engine`) vive en
+`thread_local` del hilo principal y las operaciones se serializan con
+`AppHandle::run_on_main_thread`.
+
+- `profiles.rs`: raíz `browser-profiles`, creación/borrado con reintentos, tamaños y descargas.
+- `runtime.rs`: entornos WebView2 por perfil (`CreateCoreWebView2EnvironmentWithOptions`),
+  pestañas, navegación, límites, títulos reales, descargas y limpieza de datos
+  (`ICoreWebView2Profile2::ClearBrowsingData`).
+- `protection.rs`: motor `adblock-rust`, listas, bloqueo con `WebResourceRequested` (respuesta 403),
+  contadores y excepciones por sitio.
+- `mod.rs`: instantánea para la interfaz, normalización de URL y lista blanca de ventanas
+  emergentes.
+
+La interfaz reserva un área y envía sus límites con `browser_set_bounds`; al abrir un panel o
+cambiar de página se oculta el WebView para que el HTML siga siendo clicable.
+
 ## 6. Eventos Tauri
 
 | Evento | Carga |
@@ -132,6 +173,8 @@ El frontend recibe `queue:changed` (instantánea), `queue:progress` (porcentaje 
 | `clips:changed` | `{ clipId }` |
 | `accounts:changed` | `{}` |
 | `queue:changed` / `queue:progress` / `queue:finished` | instantánea / item / fin |
+| `browser:changed` / `browser:notice` / `browser:protection` / `browser:download` | refresco del navegador, avisos, estado de protección y descargas |
+| `assisted:changed` | instantánea de la cola asistida |
 
 ## 7. Seguridad
 
@@ -145,6 +188,9 @@ El frontend recibe `queue:changed` (instantánea), `queue:progress` (porcentaje 
 - **Procesos**: argumentos separados, `kill_on_drop`, consola oculta y salida de error acotada.
 - **CSP**: se deja `null` porque el reproductor usa `asset:`; el contenido remoto se limita a
   miniaturas https y la API no acepta HTML.
+- **Navegador**: solo http(s), sin `javascript:`/`data:`/`file:`, HTTPS forzado en plataformas,
+  ventanas emergentes limitadas a dominios oficiales, descargas peligrosas bloqueadas y perfiles
+  fuera del alcance de los borrados de proyectos. Ver [`BROWSER.md`](BROWSER.md).
 
 ## 8. Pruebas
 
@@ -152,18 +198,21 @@ El frontend recibe `queue:changed` (instantánea), `queue:progress` (porcentaje 
 |---|---|---|
 | Typecheck + build frontend | `npm run build` | OK |
 | Unitarias frontend | `npm test` | 10/10 |
-| Unitarias backend | `cargo test` | 39/39 |
+| Unitarias backend | `cargo test` | 53/53 |
 | Compilación | `cargo check` | Sin avisos |
-| Release + instalador | `npm run tauri:build` | `parcut.exe` 16,4 MB · instalador 1.1.0 (80,5 MiB) |
+| Release + instalador | `npm run tauri:build` | `parcut.exe` 19,3 MB · instalador 1.2.0 (81,4 MiB) |
 | Instalación / desinstalación | NSIS `/S` y `uninstall.exe /S` | OK |
 | E2E release (importar, dividir, recortar, reproducir, migrar, eliminar) | UI + CDP | OK |
 | Metadatos de YouTube | `download_metadata` | OK (8 calidades) |
-| Publicación real | requiere credenciales | Pendiente externo |
+| Navegador, sesiones y protección | UI + CDP | 35 comprobaciones OK (ver [`BROWSER.md`](BROWSER.md)) |
+| Persistencia tras reiniciar | UI + CDP | 15 comprobaciones OK |
+| Publicación real por API | requiere credenciales | Pendiente externo |
 
 ## 9. Cómo ampliar
 
 - **Nueva plataforma**: añadir variante en `Platform`, implementar `publish/platforms/<x>.rs`,
-  registrar el despacho en `publish/mod.rs` y documentar credenciales/permisos.
+  registrar el despacho en `publish/mod.rs` y documentar credenciales/permisos. Para el navegador,
+  añadir el perfil a `browser::profiles::PROFILES` y sus URL base.
 - **Nuevo comando**: crear función `#[tauri::command]` en `commands/`, registrarla en `lib.rs` y
   exponer el wrapper tipado en `src/lib/api.ts`.
 - **Nuevo evento**: emitir desde Rust y escuchar en `src/App.tsx` o en la página correspondiente;
