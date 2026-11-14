@@ -13,6 +13,7 @@ import {
 export type View =
   | "home"
   | "new"
+  | "browser"
   | "project"
   | "clips"
   | "publish"
@@ -40,6 +41,7 @@ interface AppStore {
   projectId: string | null;
   publishProjectId: string | null;
   publishClipIds: string[] | null;
+  browserStartAssisted: boolean;
   settings: Settings | null;
   appInfo: AppInfo | null;
   accounts: Account[];
@@ -49,6 +51,7 @@ interface AppStore {
   tasks: Record<string, TaskInfo>;
   toasts: Toast[];
   navigate: (view: View, options?: { projectId?: string; publishProjectId?: string; clipIds?: string[] }) => void;
+  setBrowserStartAssisted: (value: boolean) => void;
   loadSettings: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
   loadProjects: () => Promise<void>;
@@ -83,6 +86,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   projectId: null,
   publishProjectId: null,
   publishClipIds: null,
+  browserStartAssisted: false,
   settings: null,
   appInfo: null,
   accounts: [],
@@ -103,6 +107,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         view === "publish" ? options?.clipIds ?? get().publishClipIds : null,
     });
   },
+
+  setBrowserStartAssisted: (value) => set({ browserStartAssisted: value }),
 
   loadSettings: async () => {
     try {

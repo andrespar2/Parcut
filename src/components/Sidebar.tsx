@@ -1,6 +1,7 @@
 import {
   Clapperboard,
   FolderOpen,
+  Globe,
   Home,
   PlusCircle,
   Settings,
@@ -12,6 +13,7 @@ import { useAppStore, View } from "../store/app";
 const NAV: { view: View; label: string; icon: typeof Home }[] = [
   { view: "home", label: "Inicio", icon: Home },
   { view: "new", label: "Nuevo proyecto", icon: PlusCircle },
+  { view: "browser", label: "Navegador", icon: Globe },
   { view: "clips", label: "Mis clips", icon: Clapperboard },
   { view: "publish", label: "Publicaciones", icon: Share2 },
   { view: "accounts", label: "Cuentas conectadas", icon: Users },

@@ -4,6 +4,7 @@ import { activeTaskCount, useAppStore, View } from "../store/app";
 const TITLES: Record<View, { title: string; subtitle: string }> = {
   home: { title: "Inicio", subtitle: "Tu espacio de trabajo" },
   new: { title: "Nuevo proyecto", subtitle: "Descarga o importa un video para empezar" },
+  browser: { title: "Navegador", subtitle: "Sesiones web, protección y publicación asistida" },
   project: { title: "Proyecto", subtitle: "Detalles, división y clips" },
   clips: { title: "Mis clips", subtitle: "Todos los fragmentos generados" },
   publish: { title: "Publicaciones", subtitle: "Cola secuencial y confirmación por plataforma" },

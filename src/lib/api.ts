@@ -188,6 +188,11 @@ export interface Settings {
   tiktokClientKey: string;
   tiktokPrivacyLevel: "SELF_ONLY" | "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS";
   defaultPrivacy: "private" | "public";
+  browserKeepSession: boolean;
+  webProtectionEnabled: boolean;
+  webProtectionLevel: "standard" | "intensive";
+  browserDownloadDir: string;
+  browserAutoOpenDownloads: boolean;
 }
 
 export interface PlatformStatus {
@@ -248,6 +253,126 @@ export interface TaskProgress {
   message: string;
   currentPart?: number;
   totalParts?: number;
+}
+
+/* ------------------------------------------------------------ Navegador */
+
+export interface BrowserProfileInfo {
+  id: string;
+  label: string;
+  sizeBytes: number;
+  hasData: boolean;
+}
+
+export interface BrowserTabInfo {
+  id: string;
+  profile: string;
+  title: string;
+  url: string;
+  loading: boolean;
+  homeUrl: string;
+}
+
+export interface BrowserDownloadInfo {
+  id: string;
+  profile: string;
+  url: string;
+  path: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface FilterListInfo {
+  id: string;
+  name: string;
+  url: string;
+  license: string;
+  bytes: number;
+  updatedAt: string | null;
+  intensiveOnly: boolean;
+  installed: boolean;
+}
+
+export interface SiteRule {
+  profile: string;
+  host: string;
+  enabled: boolean;
+}
+
+export interface BrowserProtectionStatus {
+  enabled: boolean;
+  level: "standard" | "intensive";
+  engineReady: boolean;
+  rules: number;
+  lists: FilterListInfo[];
+  sites: SiteRule[];
+  blockedTotal: number;
+  blockedByProfile: Record<string, number>;
+  updateRunning: boolean;
+  lastUpdate: string | null;
+  lastError: string | null;
+}
+
+export interface BrowserSnapshot {
+  tabs: BrowserTabInfo[];
+  activeId: string | null;
+  visible: boolean;
+  profiles: BrowserProfileInfo[];
+  protection: BrowserProtectionStatus;
+  downloads: BrowserDownloadInfo[];
+  keepSession: boolean;
+}
+
+/* ------------------------------------------------- Publicación asistida */
+
+export type AssistedStatus =
+  | "pending"
+  | "preparing"
+  | "waiting"
+  | "published"
+  | "error"
+  | "canceled";
+
+export interface AssistedItem {
+  id: string;
+  projectId: string;
+  clipId: string;
+  projectName: string;
+  partIndex: number;
+  platform: string;
+  title: string;
+  description: string;
+  hashtags: string[];
+  status: AssistedStatus;
+  error: string | null;
+  remoteUrl: string | null;
+  sortIndex: number;
+  createdAt: string;
+  updatedAt: string;
+  clipPath: string;
+}
+
+export interface AssistedSnapshot {
+  items: AssistedItem[];
+  activeId: string | null;
+  paused: boolean;
+  published: number;
+  pending: number;
+  failed: number;
+  canceled: number;
+}
+
+export interface AssistedClipInput {
+  clipId: string;
+  title: string;
+  description: string;
+  hashtags: string[];
+}
+
+export interface AssistedRequest {
+  projectId: string;
+  platform: string;
+  clips: AssistedClipInput[];
 }
 
 /* ------------------------------------------------------------------- API */
@@ -317,6 +442,48 @@ export const api = {
   queueCancelRemaining: () => invoke<number>("queue_cancel_remaining"),
   queueRetry: (itemId: string) => invoke<void>("queue_retry", { itemId }),
   queueCancelItem: (itemId: string) => invoke<void>("queue_cancel_item", { itemId }),
+
+  browserOpen: () => invoke<BrowserSnapshot>("browser_open"),
+  browserSnapshot: () => invoke<BrowserSnapshot>("browser_snapshot"),
+  browserHide: () => invoke<void>("browser_hide"),
+  browserSetBounds: (x: number, y: number, width: number, height: number) =>
+    invoke<void>("browser_set_bounds", { x, y, width, height }),
+  browserActivate: (tabId: string) => invoke<void>("browser_activate", { tabId }),
+  browserNewTab: (profile: string) => invoke<BrowserTabInfo>("browser_new_tab", { profile }),
+  browserCloseTab: (tabId: string) => invoke<void>("browser_close_tab", { tabId }),
+  browserNavigate: (input: string, tabId?: string | null) =>
+    invoke<void>("browser_navigate", { input, tabId: tabId ?? null }),
+  browserAction: (action: "back" | "forward" | "reload" | "stop", tabId?: string | null) =>
+    invoke<void>("browser_action", { action, tabId: tabId ?? null }),
+  browserOpenPlatform: (profile: string, url?: string) =>
+    invoke<BrowserTabInfo>("browser_open_platform", { profile, url: url ?? null }),
+  browserClearData: (profile: string, mode: "session" | "cache" | "profile") =>
+    invoke<void>("browser_clear_data", { profile, mode }),
+  browserProtectionStatus: () => invoke<BrowserProtectionStatus>("browser_protection_status"),
+  browserProtectionSet: (enabled: boolean) =>
+    invoke<void>("browser_protection_set", { enabled }),
+  browserProtectionLevel: (level: "standard" | "intensive") =>
+    invoke<void>("browser_protection_level", { level }),
+  browserUpdateLists: () => invoke<BrowserProtectionStatus>("browser_update_lists"),
+  browserSiteSet: (profile: string, host: string, enabled: boolean) =>
+    invoke<void>("browser_site_set", { profile, host, enabled }),
+  browserSiteRemove: (profile: string, host: string) =>
+    invoke<void>("browser_site_remove", { profile, host }),
+  browserOpenExternal: (url: string) => invoke<void>("browser_open_external", { url }),
+  browserPurgeSessions: () => invoke<void>("browser_purge_sessions"),
+  browserOpenDownloads: () => invoke<string>("browser_open_downloads"),
+
+  assistedSnapshot: () => invoke<AssistedSnapshot>("assisted_snapshot"),
+  assistedEnqueue: (request: AssistedRequest) => invoke<number>("assisted_enqueue", { request }),
+  assistedStart: () => invoke<AssistedSnapshot>("assisted_start"),
+  assistedPause: () => invoke<AssistedSnapshot>("assisted_pause"),
+  assistedCancelRemaining: () => invoke<number>("assisted_cancel_remaining"),
+  assistedConfirm: (itemId: string, remoteUrl?: string | null) =>
+    invoke<AssistedSnapshot>("assisted_confirm", { itemId, remoteUrl: remoteUrl ?? null }),
+  assistedFail: (itemId: string, message: string) =>
+    invoke<AssistedSnapshot>("assisted_fail", { itemId, message }),
+  assistedRetry: (itemId: string) => invoke<AssistedSnapshot>("assisted_retry", { itemId }),
+  assistedReload: () => invoke<AssistedSnapshot>("assisted_reload"),
 };
 
 export function errorMessage(error: unknown): string {

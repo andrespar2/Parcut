@@ -1,9 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Clapperboard, Filter, Loader2, PlusCircle, Share2, Trash2 } from "lucide-react";
+import {
+  Clapperboard,
+  Filter,
+  Hash,
+  Loader2,
+  PlusCircle,
+  Send,
+  Share2,
+  Trash2,
+} from "lucide-react";
 import { api, Clip, errorMessage } from "../lib/api";
-import { formatBytes, formatDuration, platformLabel } from "../lib/format";
-import { useAppStore } from "../store/app";import { Alert, EmptyState, Modal, Pill } from "../components/ui";
+import {
+  defaultPartTitle,
+  formatBytes,
+  formatDuration,
+  normalizeHashtags,
+  platformLabel,
+} from "../lib/format";
+import { useAppStore } from "../store/app";
+import { Alert, EmptyState, Modal, Pill, Segmented } from "../components/ui";
 import { ClipCard } from "../components/ClipCard";
 import { PlayerModal } from "../components/PlayerModal";
 
@@ -13,6 +29,7 @@ export function ClipsPage() {
   const toast = useAppStore((state) => state.toast);
   const refreshAll = useAppStore((state) => state.refreshAll);
   const settings = useAppStore((state) => state.settings);
+  const setBrowserStartAssisted = useAppStore((state) => state.setBrowserStartAssisted);
 
   const [clipsByProject, setClipsByProject] = useState<Record<string, Clip[]>>({});
   const [loading, setLoading] = useState(true);
@@ -20,6 +37,15 @@ export function ClipsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<Clip | null>(null);
   const [clipToDelete, setClipToDelete] = useState<Clip | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishPlatform, setPublishPlatform] = useState<"youtube" | "facebook" | "tiktok">(
+    "youtube",
+  );
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const [publishTags, setPublishTags] = useState<string[]>([]);
+  const [publishDescription, setPublishDescription] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
+  const [enqueueing, setEnqueueing] = useState(false);
 
   const load = useCallback(async () => {
     if (projects.length === 0) {
@@ -116,10 +142,57 @@ export function ClipsPage() {
       toast("info", "Selecciona clips de un solo proyecto para publicarlos juntos.");
       return;
     }
-    navigate("publish", {
-      publishProjectId: uniqueProject,
-      clipIds: selectedClips.map((clip) => clip.id),
-    });
+    const project = projects.find((item) => item.id === uniqueProject);
+    const tags = normalizeHashtags(project?.hashtags ?? []);
+    setPublishTags(tags);
+    setPublishDescription("");
+    setTagDraft("");
+    setPublishPlatform("youtube");
+    setTitles(
+      Object.fromEntries(
+        selectedClips.map((clip) => [
+          clip.id,
+          defaultPartTitle(project?.name ?? "Video", clip.partIndex),
+        ]),
+      ),
+    );
+    setPublishOpen(true);
+  };
+
+  const addPublishTag = () => {
+    const parsed = normalizeHashtags([tagDraft]);
+    if (parsed.length === 0) return;
+    setPublishTags((current) => normalizeHashtags([...current, ...parsed]));
+    setTagDraft("");
+  };
+
+  const enqueueAssisted = async () => {
+    if (!uniqueProject) return;
+    setEnqueueing(true);
+    try {
+      const ordered = [...selectedClips].sort((a, b) => a.partIndex - b.partIndex);
+      const count = await api.assistedEnqueue({
+        projectId: uniqueProject,
+        platform: publishPlatform,
+        clips: ordered.map((clip) => ({
+          clipId: clip.id,
+          title: titles[clip.id]?.trim() || defaultPartTitle("Video", clip.partIndex),
+          description: publishDescription,
+          hashtags: publishTags,
+        })),
+      });
+      toast(
+        "success",
+        `${count} clip(s) listos. Se abrirá ${platformLabel(publishPlatform)} para publicar la primera parte.`,
+      );
+      setPublishOpen(false);
+      setBrowserStartAssisted(true);
+      navigate("browser");
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setEnqueueing(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -151,7 +224,7 @@ export function ClipsPage() {
           onClick={goPublish}
         >
           <Share2 />
-          Publicar selección ({selectedClips.length})
+          Publicar en redes sociales ({selectedClips.length})
         </button>
         <button className="btn btn-sm" onClick={() => navigate("new")}>
           <PlusCircle /> Nuevo proyecto
@@ -277,6 +350,132 @@ export function ClipsPage() {
         <p className="small muted">
           Esta acción no afecta al video original ni al resto de clips del proyecto.
         </p>
+      </Modal>
+
+      <Modal
+        open={publishOpen}
+        title="Publicar en redes sociales"
+        subtitle="Publicación asistida: ParCut abre la plataforma y tú confirmas cada parte."
+        onClose={() => setPublishOpen(false)}
+        wide
+        busy={enqueueing}
+        actions={
+          <>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setPublishOpen(false)}
+              disabled={enqueueing}
+            >
+              Cancelar
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={enqueueAssisted}
+              disabled={enqueueing || selectedClips.length === 0}
+            >
+              {enqueueing ? <Loader2 className="spin" /> : <Send />}
+              Añadir a la cola y abrir {platformLabel(publishPlatform)}
+            </button>
+          </>
+        }
+      >
+        <div className="col" style={{ gap: 14 }}>
+          <Alert tone="info">
+            Se usará la sesión que ya hayas iniciado en el navegador de ParCut. No se necesitan
+            credenciales de desarrollador. Tú eliges el archivo y confirmas en ParCut cuando la
+            plataforma haya publicado la parte.
+          </Alert>
+
+          <div className="field">
+            <label>Plataforma de destino</label>
+            <Segmented
+              value={publishPlatform}
+              onChange={setPublishPlatform}
+              options={[
+                { value: "youtube", label: "YouTube" },
+                { value: "facebook", label: "Facebook" },
+                { value: "tiktok", label: "TikTok" },
+              ]}
+            />
+            <span className="field-hint">
+              Si no tienes sesión iniciada, podrás hacerlo en la página oficial que se abrirá en el
+              navegador integrado.
+            </span>
+          </div>
+
+          <div className="field">
+            <label>Clips y títulos (orden ascendente)</label>
+            <div className="col" style={{ gap: 8, maxHeight: 260, overflowY: "auto", paddingRight: 4 }}>
+              {[...selectedClips]
+                .sort((a, b) => a.partIndex - b.partIndex)
+                .map((clip) => (
+                  <div key={clip.id} className="row" style={{ gap: 8 }}>
+                    <span className="pill muted" style={{ flex: "none" }}>
+                      Parte {clip.partIndex}
+                    </span>
+                    <input
+                      className="input"
+                      value={titles[clip.id] ?? ""}
+                      onChange={(event) =>
+                        setTitles((current) => ({ ...current, [clip.id]: event.target.value }))
+                      }
+                      spellCheck={false}
+                      aria-label={`Título de la parte ${clip.partIndex}`}
+                    />
+                    <span className="small faint" style={{ flex: "none" }}>
+                      {formatDuration(clip.duration)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Hashtags generales</label>
+            <div className="chips">
+              {publishTags.map((tag) => (
+                <span key={tag} className="chip">
+                  #{tag}
+                  <button
+                    onClick={() => setPublishTags(publishTags.filter((item) => item !== tag))}
+                    aria-label={`Quitar ${tag}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {publishTags.length === 0 ? <span className="small faint">Sin hashtags</span> : null}
+            </div>
+            <div className="chip-add">
+              <input
+                className="input"
+                placeholder="#viaje #colombia"
+                value={tagDraft}
+                onChange={(event) => setTagDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addPublishTag();
+                  }
+                }}
+              />
+              <button className="btn" onClick={addPublishTag}>
+                <Hash /> Añadir
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Descripción general</label>
+            <textarea
+              className="textarea"
+              placeholder="Se copiará junto con el título para que la pegues en la plataforma."
+              value={publishDescription}
+              onChange={(event) => setPublishDescription(event.target.value)}
+              maxLength={5000}
+            />
+          </div>
+        </div>
       </Modal>
     </div>
   );

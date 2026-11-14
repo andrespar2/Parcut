@@ -3,15 +3,19 @@ import { listen } from "@tauri-apps/api/event";
 import {
   AlertCircle,
   ArrowUpRight,
+  Check,
   CheckCircle2,
   ChevronDown,
+  ClipboardCopy,
   Clock,
+  Globe,
   Hash,
   Loader2,
   Pause,
   Play,
   Plus,
   RotateCcw,
+  Send,
   ShieldCheck,
   Sparkles,
   Square,
@@ -19,6 +23,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  AssistedSnapshot,
   Clip,
   EnqueueClip,
   errorMessage,
@@ -56,6 +61,31 @@ function statusTone(status: string): "accent" | "success" | "warning" | "danger"
   }
 }
 
+const ASSISTED_STATUS_LABELS: Record<string, string> = {
+  pending: "Pendiente",
+  preparing: "Preparando publicación",
+  waiting: "Esperando tu confirmación",
+  published: "Publicado",
+  error: "Error",
+  canceled: "Cancelado",
+};
+
+function assistedTone(status: string): "accent" | "success" | "warning" | "danger" | "muted" {
+  switch (status) {
+    case "published":
+      return "success";
+    case "error":
+      return "danger";
+    case "canceled":
+      return "muted";
+    case "preparing":
+    case "waiting":
+      return "accent";
+    default:
+      return "warning";
+  }
+}
+
 export function PublishPage() {
   const projects = useAppStore((state) => state.projects);
   const accounts = useAppStore((state) => state.accounts);
@@ -66,6 +96,11 @@ export function PublishPage() {
   const toast = useAppStore((state) => state.toast);
   const loadQueue = useAppStore((state) => state.loadQueue);
   const setQueue = useAppStore((state) => state.setQueue);
+  const setBrowserStartAssisted = useAppStore((state) => state.setBrowserStartAssisted);
+
+  const [assisted, setAssisted] = useState<AssistedSnapshot | null>(null);
+  const [assistedBusy, setAssistedBusy] = useState<string | null>(null);
+  const [assistedCancelOpen, setAssistedCancelOpen] = useState(false);
 
   const [projectId, setProjectId] = useState<string>(publishProjectId ?? "");
   const [project, setProject] = useState<Project | null>(null);
@@ -131,6 +166,24 @@ export function PublishPage() {
   useEffect(() => {
     void loadQueue();
   }, [loadQueue]);
+
+  const loadAssisted = useCallback(async () => {
+    try {
+      setAssisted(await api.assistedSnapshot());
+    } catch {
+      /* la cola asistida es independiente de las conexiones OAuth */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAssisted();
+    const unlisten = listen<AssistedSnapshot>("assisted:changed", (event) => {
+      setAssisted(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [loadAssisted]);
 
   useEffect(() => {
     const unlisteners = [
@@ -317,6 +370,53 @@ export function PublishPage() {
     });
   };
 
+  const assistedItems = useMemo(
+    () =>
+      [...(assisted?.items ?? [])].sort(
+        (a, b) => a.partIndex - b.partIndex || a.createdAt.localeCompare(b.createdAt),
+      ),
+    [assisted],
+  );
+  const assistedActive = assistedItems.find((item) => item.id === assisted?.activeId) ?? null;
+  const assistedNext = assistedItems.find((item) => item.status === "pending") ?? null;
+  const assistedFailed = assistedItems.find((item) => item.status === "error") ?? null;
+
+  const openAssistedInBrowser = () => {
+    setBrowserStartAssisted(true);
+    navigate("browser");
+  };
+
+  const runAssisted = async (key: string, action: () => Promise<AssistedSnapshot>) => {
+    setAssistedBusy(key);
+    try {
+      setAssisted(await action());
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setAssistedBusy(null);
+    }
+  };
+
+  const confirmAssisted = () =>
+    assistedActive && runAssisted("confirm", () => api.assistedConfirm(assistedActive.id));
+
+  const retryAssisted = () =>
+    assistedFailed && runAssisted("retry", () => api.assistedRetry(assistedFailed.id));
+
+  const cancelAssisted = async () => {
+    setAssistedBusy("cancel");
+    try {
+      const count = await api.assistedCancelRemaining();
+      setAssistedCancelOpen(false);
+      toast("info", `${count} publicaciones asistidas canceladas.`);
+      await loadAssisted();
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setAssistedBusy(null);
+    }
+  };
+
   if (projects.length === 0) {
     return (
       <div className="page">
@@ -348,6 +448,151 @@ export function PublishPage() {
           <ShieldCheck /> Cuentas
         </button>
       </div>
+
+      <section className="card col" style={{ gap: 12 }}>
+        <div className="row wrap" style={{ alignItems: "flex-start" }}>
+          <div className="grow" style={{ minWidth: 240 }}>
+            <h3 className="card-title">
+              <Globe size={16} /> Publicación asistida por navegador
+            </h3>
+            <p className="card-sub" style={{ marginTop: 4 }}>
+              ParCut abre la página oficial de subida con la sesión del navegador integrado. Tú
+              eliges el archivo y confirmas cada parte; no se automatizan clics ni verificaciones.
+            </p>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <button
+              className="btn btn-sm"
+              onClick={() =>
+                void runAssisted(
+                  assisted?.paused ? "resume" : "pause",
+                  assisted?.paused ? () => api.assistedStart() : () => api.assistedPause(),
+                )
+              }
+              disabled={assistedBusy !== null || (!assistedActive && !assisted?.paused)}
+            >
+              {assisted?.paused ? <Play /> : <Pause />}
+              {assisted?.paused ? "Reanudar" : "Pausar"}
+            </button>
+            <button className="btn btn-sm" onClick={openAssistedInBrowser}>
+              <Globe /> Abrir navegador
+            </button>
+          </div>
+        </div>
+
+        {assistedItems.length === 0 ? (
+          <span className="small faint">
+            No hay publicaciones asistidas. Selecciona clips en <strong>Mis clips</strong> y usa
+            «Publicar en redes sociales» para preparar una cola.
+          </span>
+        ) : (
+          <>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <Pill tone="success">{assisted?.published ?? 0} publicadas</Pill>
+              <Pill tone="warning">{assisted?.pending ?? 0} pendientes</Pill>
+              {(assisted?.failed ?? 0) > 0 ? (
+                <Pill tone="danger">{assisted?.failed} con error</Pill>
+              ) : null}
+              {(assisted?.canceled ?? 0) > 0 ? (
+                <Pill tone="muted">{assisted?.canceled} canceladas</Pill>
+              ) : null}
+              {assisted?.paused ? <Pill tone="muted">En pausa</Pill> : null}
+              <div className="spacer" />
+              {assistedActive ? (
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => void confirmAssisted()}
+                  disabled={assistedBusy !== null}
+                >
+                  {assistedBusy === "confirm" ? <Loader2 className="spin" /> : <Check />}
+                  Confirmar parte {assistedActive.partIndex}
+                </button>
+              ) : assistedFailed ? (
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => void retryAssisted()}
+                  disabled={assistedBusy !== null}
+                >
+                  {assistedBusy === "retry" ? <Loader2 className="spin" /> : <Play />}
+                  Reintentar parte {assistedFailed.partIndex}
+                </button>
+              ) : assistedNext ? (
+                <button className="btn btn-sm btn-primary" onClick={openAssistedInBrowser}>
+                  <Send /> Preparar parte {assistedNext.partIndex}
+                </button>
+              ) : null}
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setAssistedCancelOpen(true)}
+                disabled={assistedBusy !== null || (assisted?.pending ?? 0) === 0}
+              >
+                <X /> Cancelar restantes
+              </button>
+            </div>
+
+            <div className="col" style={{ gap: 6, maxHeight: 250, overflowY: "auto" }}>
+              {assistedItems.slice(0, 60).map((item) => (
+                <div key={item.id} className="account-row">
+                  <Pill tone={assistedTone(item.status)}>Parte {item.partIndex}</Pill>
+                  <span style={{ display: "flex", flex: "none" }}>
+                    <PlatformLogo platform={item.platform} size={14} />
+                  </span>
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {item.title}
+                    </div>
+                    <div
+                      className="small faint"
+                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {platformLabel(item.platform)} · {ASSISTED_STATUS_LABELS[item.status] ?? item.status}
+                      {item.error ? ` · ${item.error}` : ""}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 4, flex: "none" }}>
+                    <button
+                      className="icon-btn"
+                      title="Copiar metadatos"
+                      onClick={() =>
+                        void navigator.clipboard.writeText(
+                          [
+                            item.title,
+                            item.description.trim(),
+                            item.hashtags.map((tag) => `#${tag}`).join(" "),
+                          ]
+                            .filter(Boolean)
+                            .join("\n\n"),
+                        )
+                      }
+                    >
+                      <ClipboardCopy />
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="Abrir ubicación del archivo"
+                      onClick={() => item.clipPath && void api.revealPath(item.clipPath)}
+                      disabled={!item.clipPath}
+                    >
+                      <ArrowUpRight />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <span className="field-hint">
+              La cola vive en SQLite y se recupera al reiniciar ParCut. Solo se marca como publicada
+              una parte cuando tú la confirmas aquí.
+            </span>
+          </>
+        )}
+      </section>
 
       <div
         style={{
@@ -822,6 +1067,38 @@ export function PublishPage() {
         <p className="small muted">
           Las publicaciones ya completadas permanecen intactas y enlazadas a su ID real. Esta
           acción no elimina clips ni archivos del proyecto.
+        </p>
+      </Modal>
+
+      <Modal
+        open={assistedCancelOpen}
+        title="Cancelar publicaciones asistidas restantes"
+        subtitle="Se cancelarán las partes pendientes de la cola del navegador."
+        onClose={() => setAssistedCancelOpen(false)}
+        busy={assistedBusy === "cancel"}
+        actions={
+          <>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setAssistedCancelOpen(false)}
+              disabled={assistedBusy === "cancel"}
+            >
+              Volver
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={() => void cancelAssisted()}
+              disabled={assistedBusy === "cancel"}
+            >
+              {assistedBusy === "cancel" ? <Loader2 className="spin" /> : <X />}
+              Cancelar restantes
+            </button>
+          </>
+        }
+      >
+        <p className="small muted">
+          Las partes ya confirmadas como publicadas no se modifican. Los clips y archivos del
+          proyecto permanecen en disco.
         </p>
       </Modal>
 

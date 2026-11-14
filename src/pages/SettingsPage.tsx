@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   FolderOpen,
   Gauge,
+  Globe,
   HardDrive,
   Info,
   Loader2,
@@ -19,7 +20,15 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import { api, ActivityEntry, errorMessage, Settings, StorageStats } from "../lib/api";
+import {
+  api,
+  ActivityEntry,
+  BrowserProfileInfo,
+  BrowserProtectionStatus,
+  errorMessage,
+  Settings,
+  StorageStats,
+} from "../lib/api";
 import {
   formatBytes,
   formatDuration,
@@ -29,6 +38,7 @@ import {
 } from "../lib/format";
 import { useAppStore } from "../store/app";
 import { Alert, Modal, Pill, ProgressBar, Segmented, SwitchRow } from "../components/ui";
+import { PlatformLogo } from "../components/PlatformLogo";
 
 export function SettingsPage() {
   const settings = useAppStore((state) => state.settings);
@@ -36,6 +46,8 @@ export function SettingsPage() {
   const saveSettings = useAppStore((state) => state.saveSettings);
   const loadAppInfo = useAppStore((state) => state.loadAppInfo);
   const loadProjects = useAppStore((state) => state.loadProjects);
+  const loadSettings = useAppStore((state) => state.loadSettings);
+  const navigate = useAppStore((state) => state.navigate);
   const toast = useAppStore((state) => state.toast);
 
   const [form, setForm] = useState<Settings | null>(settings);
@@ -45,6 +57,14 @@ export function SettingsPage() {
   const [cleaning, setCleaning] = useState(false);
   const [cleanOpen, setCleanOpen] = useState(false);
   const [refreshingTools, setRefreshingTools] = useState(false);
+  const [protection, setProtection] = useState<BrowserProtectionStatus | null>(null);
+  const [browserProfiles, setBrowserProfiles] = useState<BrowserProfileInfo[]>([]);
+  const [browserBusy, setBrowserBusy] = useState<string | null>(null);
+  const [browserConfirm, setBrowserConfirm] = useState<{
+    profile: string;
+    label: string;
+    mode: "session" | "cache" | "profile";
+  } | null>(null);
 
   useEffect(() => {
     setForm(settings);
@@ -66,6 +86,104 @@ export function SettingsPage() {
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  const loadBrowser = useCallback(async () => {
+    try {
+      const [snapshot, status] = await Promise.all([
+        api.browserSnapshot(),
+        api.browserProtectionStatus(),
+      ]);
+      setBrowserProfiles(snapshot.profiles);
+      setProtection(status);
+    } catch (err) {
+      toast("error", errorMessage(err));
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void loadBrowser();
+  }, [loadBrowser]);
+
+  const toggleBrowserProtection = async (enabled: boolean) => {
+    setBrowserBusy("protection");
+    try {
+      await api.browserProtectionSet(enabled);
+      await Promise.all([loadBrowser(), loadSettings()]);
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setBrowserBusy(null);
+    }
+  };
+
+  const changeProtectionLevel = async (level: "standard" | "intensive") => {
+    setBrowserBusy("level");
+    try {
+      await api.browserProtectionLevel(level);
+      await Promise.all([loadBrowser(), loadSettings()]);
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setBrowserBusy(null);
+    }
+  };
+
+  const updateFilterLists = async () => {
+    setBrowserBusy("lists");
+    try {
+      await api.browserUpdateLists();
+      await loadBrowser();
+      toast("info", "Listas de filtros actualizadas.");
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setBrowserBusy(null);
+    }
+  };
+
+  const clearBrowserProfile = async () => {
+    if (!browserConfirm) return;
+    const { profile, mode, label } = browserConfirm;
+    setBrowserBusy(`clear-${profile}`);
+    try {
+      await api.browserClearData(profile, mode);
+      await loadBrowser();
+      toast(
+        "success",
+        mode === "profile"
+          ? `Perfil de ${label} eliminado.`
+          : `Datos de ${label} actualizados.`,
+      );
+      setBrowserConfirm(null);
+    } catch (err) {
+      toast("error", errorMessage(err));
+    } finally {
+      setBrowserBusy(null);
+    }
+  };
+
+  const pickBrowserDownloads = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Carpeta de descargas del navegador",
+      defaultPath: form?.browserDownloadDir || undefined,
+    });
+    if (typeof selected === "string" && form) {
+      update({ browserDownloadDir: selected });
+    }
+  };
+
+  const browserConfirmText = useMemo(() => {
+    if (!browserConfirm) return "";
+    if (browserConfirm.mode === "session") {
+      return `Se cerrarán las sesiones iniciadas en ${browserConfirm.label}. Las demás plataformas no se modifican.`;
+    }
+    if (browserConfirm.mode === "cache") {
+      return `Se eliminarán los archivos temporales de ${browserConfirm.label}. La sesión iniciada se conserva.`;
+    }
+    return `Se eliminará todo el perfil de ${browserConfirm.label}: cookies, almacenamiento local, caché e historial. Las demás plataformas no se modifican.`;
+  }, [browserConfirm]);
 
   const dirty = useMemo(() => {
     if (!form || !settings) return false;
@@ -474,6 +592,177 @@ export function SettingsPage() {
         </div>
       </section>
 
+      <section className="card col" style={{ gap: 16 }}>
+        <div className="row wrap" style={{ alignItems: "flex-start" }}>
+          <div className="grow" style={{ minWidth: 240 }}>
+            <h3 className="card-title">
+              <Globe size={16} /> Navegador integrado
+            </h3>
+            <p className="card-sub">
+              Sesiones persistentes por plataforma y Protección web de ParCut. Los perfiles se
+              guardan en el almacenamiento local de ParCut.
+            </p>
+          </div>
+          <button className="btn btn-sm" onClick={() => navigate("browser")}>
+            <Globe /> Abrir navegador
+          </button>
+        </div>
+
+        {protection ? (
+          <>
+            <SwitchRow
+              label="Protección web de ParCut"
+              hint="Bloqueo de anuncios y rastreadores conocidos dentro del navegador integrado."
+              checked={protection.enabled}
+              onChange={(value) => void toggleBrowserProtection(value)}
+            />
+            <div className="input-row">
+              <div className="field">
+                <label>Nivel de protección</label>
+                <Segmented
+                  value={protection.level}
+                  onChange={(value) => void changeProtectionLevel(value)}
+                  options={[
+                    { value: "standard", label: "Estándar" },
+                    { value: "intensive", label: "Intensiva" },
+                  ]}
+                />
+                <span className="field-hint">
+                  Estándar usa EasyList y EasyPrivacy. Intensiva añade la lista de servidores de
+                  Peter Lowe, que puede afectar a contenido incrustado.
+                </span>
+              </div>
+              <div className="field">
+                <label>Listas de filtros</label>
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => void updateFilterLists()}
+                    disabled={protection.updateRunning || browserBusy !== null}
+                  >
+                    {protection.updateRunning ? <Loader2 className="spin" /> : <RefreshCw />}
+                    {protection.updateRunning ? "Actualizando…" : "Actualizar listas"}
+                  </button>
+                  <span className="small faint">
+                    {protection.engineReady
+                      ? `${protection.rules.toLocaleString("es-ES")} reglas · ${protection.blockedTotal} bloqueos`
+                      : "Preparando el motor de protección…"}
+                  </span>
+                </div>
+                {protection.lastError ? (
+                  <span className="field-hint">{protection.lastError}</span>
+                ) : (
+                  <span className="field-hint">
+                    Las listas se descargan desde sus fuentes oficiales y no se incluyen en el
+                    instalador.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="col" style={{ gap: 8 }}>
+              <div className="row between">
+                <span className="small muted">Perfiles y sesiones</span>
+                <span className="small faint">
+                  {formatBytes(browserProfiles.reduce((total, item) => total + item.sizeBytes, 0))} en
+                  disco
+                </span>
+              </div>
+              {browserProfiles.map((profile) => (
+                <div key={profile.id} className="browser-profile-row">
+                  <div className="browser-profile-head">
+                    <span className={`platform-logo ${profile.id}`}>
+                      <PlatformLogo platform={profile.id} size={18} />
+                    </span>
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <strong style={{ fontSize: 12.5 }}>{profile.label}</strong>
+                      <div className="small faint">
+                        {profile.hasData
+                          ? `${formatBytes(profile.sizeBytes)} en disco`
+                          : "Sin datos guardados"}
+                      </div>
+                    </div>
+                    <Pill tone={profile.hasData ? "success" : "muted"}>
+                      {profile.hasData ? "Con datos" : "Vacío"}
+                    </Pill>
+                  </div>
+                  <div className="row wrap" style={{ gap: 6 }}>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() =>
+                        setBrowserConfirm({
+                          profile: profile.id,
+                          label: profile.label,
+                          mode: "cache",
+                        })
+                      }
+                      disabled={browserBusy !== null}
+                    >
+                      Limpiar caché
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() =>
+                        setBrowserConfirm({
+                          profile: profile.id,
+                          label: profile.label,
+                          mode: "session",
+                        })
+                      }
+                      disabled={browserBusy !== null}
+                    >
+                      Borrar sesión
+                    </button>
+                    <button
+                      className="btn btn-sm btn-danger"
+                      onClick={() =>
+                        setBrowserConfirm({
+                          profile: profile.id,
+                          label: profile.label,
+                          mode: "profile",
+                        })
+                      }
+                      disabled={browserBusy !== null}
+                    >
+                      <Trash2 /> Eliminar perfil
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {browserProfiles.length === 0 ? (
+                <span className="small faint">
+                  Los perfiles se crean la primera vez que abres el navegador.
+                </span>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label>Carpeta de descargas del navegador</label>
+              <div className="row" style={{ gap: 6 }}>
+                <input
+                  className="input"
+                  value={form.browserDownloadDir}
+                  placeholder="Carpeta predeterminada de ParCut"
+                  readOnly
+                />
+                <button className="btn btn-sm" onClick={() => void pickBrowserDownloads()}>
+                  <FolderOpen /> Elegir
+                </button>
+                <button className="btn btn-sm btn-ghost" onClick={() => void api.browserOpenDownloads()}>
+                  <FolderOpen /> Abrir
+                </button>
+              </div>
+              <span className="field-hint">
+                Los ejecutables y scripts se bloquean por seguridad. La carpeta se aplica al
+                guardar los cambios.
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="small faint">Cargando el estado del navegador…</p>
+        )}
+      </section>
+
       <section className="card col" style={{ gap: 14 }}>
         <div className="row wrap" style={{ alignItems: "flex-start" }}>
           <div className="grow" style={{ minWidth: 240 }}>
@@ -617,6 +906,48 @@ export function SettingsPage() {
         <p className="small muted">
           Se liberarán aproximadamente {formatBytes(stats?.tempBytes ?? 0)}. Los videos originales,
           clips, miniaturas y la cola de publicaciones no se modifican.
+        </p>
+      </Modal>
+
+      <Modal
+        open={browserConfirm !== null}
+        title={
+          browserConfirm?.mode === "profile"
+            ? `Eliminar el perfil de ${browserConfirm?.label ?? ""}`
+            : browserConfirm?.mode === "session"
+              ? `Borrar la sesión de ${browserConfirm?.label ?? ""}`
+              : `Limpiar la caché de ${browserConfirm?.label ?? ""}`
+        }
+        subtitle="Esta acción solo afecta al perfil seleccionado."
+        onClose={() => setBrowserConfirm(null)}
+        busy={browserBusy !== null}
+        actions={
+          <>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setBrowserConfirm(null)}
+              disabled={browserBusy !== null}
+            >
+              Cancelar
+            </button>
+            <button
+              className={`btn ${browserConfirm?.mode === "cache" ? "btn-primary" : "btn-danger"}`}
+              onClick={() => void clearBrowserProfile()}
+              disabled={browserBusy !== null}
+            >
+              {browserBusy !== null ? <Loader2 className="spin" /> : <Trash2 />}
+              {browserConfirm?.mode === "profile"
+                ? "Eliminar perfil"
+                : browserConfirm?.mode === "session"
+                  ? "Borrar sesión"
+                  : "Limpiar caché"}
+            </button>
+          </>
+        }
+      >
+        <p className="small muted">{browserConfirmText}</p>
+        <p className="field-hint">
+          Los proyectos de video y las sesiones de las demás plataformas no se modifican.
         </p>
       </Modal>
     </div>

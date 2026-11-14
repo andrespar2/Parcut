@@ -7,6 +7,7 @@ import { TopBar } from "./components/TopBar";
 import { Toasts } from "./components/Toasts";
 import { HomePage } from "./pages/HomePage";
 import { NewProjectPage } from "./pages/NewProjectPage";
+import { BrowserPage } from "./pages/BrowserPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ClipsPage } from "./pages/ClipsPage";
 import { PublishPage } from "./pages/PublishPage";
@@ -18,6 +19,8 @@ function CurrentPage() {
   switch (view) {
     case "new":
       return <NewProjectPage />;
+    case "browser":
+      return <BrowserPage />;
     case "project":
       return <ProjectPage />;
     case "clips":
@@ -34,6 +37,7 @@ function CurrentPage() {
 }
 
 export default function App() {
+  const view = useAppStore((state) => state.view);
   const loadSettings = useAppStore((state) => state.loadSettings);
   const refreshAll = useAppStore((state) => state.refreshAll);
   const loadProjects = useAppStore((state) => state.loadProjects);
@@ -98,7 +102,7 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TopBar />
-        <div className="content">
+        <div className={`content${view === "browser" ? " browser-mode" : ""}`}>
           <CurrentPage />
         </div>
       </main>
