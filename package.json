@@ -32,13 +32,13 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^5.0.4",
-    "sharp": "^0.34.4",
+    "sharp": "^0.35.5",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
-    "vitest": "^3.2.4"
+    "vitest": "^5.1.0"
   },
   "allowScripts": {
-    "sharp@0.34.5": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "sharp@0.35.5": true
   }
 }
