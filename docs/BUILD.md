@@ -69,7 +69,7 @@ npm run tauri:build
 Salidas:
 
 - Ejecutable: `src-tauri/target/release/parcut.exe`
-- Instalador NSIS: `src-tauri/target/release/bundle/nsis/ParCut_1.0.0_x64-setup.exe`
+- Instalador NSIS: `src-tauri/target/release/bundle/nsis/ParCut_1.1.0_x64-setup.exe`
 
 El instalador es **por usuario** (`installMode: currentUser`), no requiere UAC, crea el acceso
 directo y registra la desinstalación. Los recursos empaquetados (FFmpeg, FFprobe, yt-dlp y sus
@@ -139,10 +139,10 @@ herramienta de cumplimiento.
 
 ## 8. Verificación del ejecutable
 
-Resultados de la compilación verificada:
+Resultados de la compilación verificada (v1.1.0):
 
 - `parcut.exe`: 16,4 MB.
-- Instalador NSIS: 80,50 MiB.
+- Instalador NSIS: 80,5 MiB.
 - Instalación silenciosa con `/S /D=<carpeta>`: correcta.
 - El ejecutable instalado detectó FFmpeg, FFprobe y yt-dlp desde su carpeta de instalación.
 - Desinstalación con `uninstall.exe /S`: eliminó la carpeta de instalación.

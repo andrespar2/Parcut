@@ -4,6 +4,28 @@ Todos los cambios relevantes de ParCut se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
 [Semantic Versioning](https://semver.org/lang/es/).
 
+## [1.1.0] — 2026-11-14
+
+### Añadido
+- **Recorte por rango antes de dividir**: permite elegir desde y hasta qué punto del video
+  original se generan los clips, con campos de horas/minutos/segundos, barra visual del rango y
+  botones para marcar el inicio y el fin desde el reproductor.
+- Opción «Usar video completo» para restablecer el rango.
+- La estimación muestra el rango seleccionado, su duración, los clips resultantes y el espacio
+  aproximado solo del fragmento elegido.
+- La numeración de las partes empieza en 1 dentro del rango recortado.
+
+### Cambiado
+- Los rangos personalizados usan siempre **corte exacto** para respetar al milisegundo el inicio
+  y el final. «Sin recodificar» queda disponible para dividir el video completo, donde conserva
+  la calidad original y la velocidad.
+- La duración elegida se guarda en el proyecto y se conserva al volver a dividir.
+- El modo y los campos de duración ya no se reinician tras cada división.
+
+### Corregido
+- La portada del proyecto se conserva al volver a dividir.
+- El indicador de tareas se limpia correctamente al terminar una división.
+
 ## [1.0.0] — 2026-11-13
 
 ### Añadido

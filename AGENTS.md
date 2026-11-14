@@ -6,7 +6,7 @@ EDITAR SIEMPRE EL AGENTS.MD CON EL FIN DE MANTENER EL CONTEXTO DEL PROYECTO ACTU
 > Aplicación de escritorio para Windows 10/11 (x64) que importa o descarga videos, los divide
 > en clips por duración y los publica de forma secuencial en YouTube, Facebook y TikTok.
 
-**Versión actual:** 1.0.0 · **Repositorio:** https://github.com/andrespar2/Parcut
+**Versión actual:** 1.1.0 · **Repositorio:** https://github.com/andrespar2/Parcut
 
 ---
 
@@ -70,9 +70,12 @@ indica y nunca finge una conexión.
 - **Cola en Rust, no en el frontend**: sobrevive a recargas y cierres; un único trabajador evita
   publicaciones simultáneas.
 - **Dos modos de división**:
-  - `copy`: `-c copy` + muxer `segment`. Rápido y sin pérdida; cortes alineados a keyframes.
+  - `copy`: `-c copy` + muxer `segment`. Rápido y sin pérdida; solo para el video completo.
   - `precise`: un proceso por parte con `-ss/-t` y recodificación H.264/AAC (CRF 20), para
-    cortes exactos.
+    cortes exactos y para respetar rangos personalizados.
+- **Recorte por rango**: `plan_split` recibe inicio y fin, calcula los límites absolutos y
+  reinicia la numeración de partes en 1. El modo `copy` se rechaza si el rango no cubre el video
+  completo, porque los keyframes no permiten respetar un inicio/fin arbitrario.
 - **Detección del codificador H.264** al arrancar: se prefiere `libx264`; si no existe, se usa
   `libopenh264`, `h264_mf`, `h264_nvenc` o `mpeg4`. Evita fallos si el usuario sustituye FFmpeg.
 - **FFmpeg GPL compartido**: la build LGPL no incluye `libx264`, imprescindible para una
@@ -178,6 +181,8 @@ Estados de cola: `pending`, `preparing`, `uploading`, `published`, `error`, `can
 - Reproductor integrado y previsualización de clips con pantalla completa.
 - División con plan/estimación, presets h/m/s, modos `copy` y `precise`, codificador H.264
   detectado, progreso real, cancelación y limpieza.
+- Recorte por rango (desde/hasta) con marcas desde el reproductor, barra visual y estimación
+  limitada al fragmento; numeración de partes desde 1.
 - Clips ordenados por parte, miniaturas, selección, reproducción, ubicación, copia y borrado.
 - OAuth 2.0 + PKCE y callback local con puertos fijos (17421/17422/17423) y flujo manual de
   respaldo; tokens DPAPI.
@@ -229,10 +234,14 @@ y se añadió `%USERPROFILE%\.cargo\bin` al `PATH` de la sesión.
 |---|---|---|
 | Typecheck + build frontend | `npm run build` | OK (1.701 módulos, ~353 kB JS / 28 kB CSS) |
 | Unitarias frontend | `npm test` | 10/10 OK |
-| Unitarias backend | `cargo test --lib` | 36/36 OK, sin avisos de compilación |
+| Unitarias backend | `cargo test --lib` | 39/39 OK, sin avisos de compilación |
 | Compilación backend | `cargo check` | OK, 0 avisos |
-| Build release + instalador | `npm run tauri:build` | OK: `parcut.exe` 16,4 MB y `ParCut_1.0.0_x64-setup.exe` 80,50 MiB |
-| Instalación NSIS silenciosa | `ParCut_1.0.0_x64-setup.exe /S /D=…` | OK; recursos `ffmpeg/` y `yt-dlp/` presentes |
+| Build release + instalador | `npm run tauri:build` | OK: `parcut.exe` ~16,4 MB y `ParCut_1.1.0_x64-setup.exe` ~80,5 MiB |
+| Recorte por rango (corte exacto) | UI | OK: rango 10–50 s, clips 15/15/10 s, inicios 10/25/40 |
+| Recorte desde el reproductor | UI | OK: marcar inicio/fin y «Usar video completo» |
+| Copy con rango personalizado | UI/IPC | Rechazado con mensaje que exige «Corte exacto» |
+| Copy con video completo | UI/IPC | OK (cortes alineados a keyframes) |
+| Instalación NSIS silenciosa | `ParCut_1.1.0_x64-setup.exe /S /D=…` | OK; recursos `ffmpeg/` y `yt-dlp/` presentes |
 | Ejecución del instalado | exe instalado + CDP | OK; herramientas detectadas en la carpeta de instalación |
 | Desinstalación | `uninstall.exe /S` | OK; carpeta de instalación eliminada |
 | E2E release (importar → dividir → reproducir → migrar → eliminar) | UI + CDP | OK (75 s, 3 partes de 25 s, corte exacto) |
@@ -254,7 +263,7 @@ rutas con `..`, roundtrip DPAPI y orden de la cola.
 Ver `docs/BUILD.md`. Salidas verificadas:
 
 - `src-tauri/target/release/parcut.exe` — 16,4 MB.
-- `src-tauri/target/release/bundle/nsis/ParCut_1.0.0_x64-setup.exe` — 80,50 MiB.
+- `src-tauri/target/release/bundle/nsis/ParCut_1.1.0_x64-setup.exe` — 80,5 MiB.
 
 Recursos empaquetados junto al ejecutable: `ffmpeg/` (ffmpeg.exe, ffprobe.exe, DLLs y
 LICENSE.txt) y `yt-dlp/yt-dlp.exe`. Los binarios **no** están en Git (`src-tauri/binaries/`
@@ -294,6 +303,7 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 | 2026-11-14 | La duración elegida volvía a 90 s tras dividir y el panel cambiaba de modo. | Se guarda la duración en el proyecto y los campos solo se reinician al abrir otro proyecto. |
 | 2026-11-14 | Cambiar el directorio de almacenamiento dejaba inaccesibles los proyectos anteriores. | Migración real de carpetas + reescritura transaccional de rutas con reversión ante fallos. |
 | 2026-11-14 | `tauri build` falló con «Acceso denegado» por el ejecutable abierto. | Cerrar la instancia de ParCut antes de recompilar. |
+| 2026-11-14 | En modo `copy`, un rango personalizado producía clips fuera del final elegido (los keyframes mandan). | Se exige «Corte exacto» para rangos personalizados; `copy` queda solo para el video completo. |
 
 ---
 
@@ -364,6 +374,18 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 - Verificación de build, pruebas, E2E y generación del instalador NSIS.
 - Archivos: `README.md`, `CHANGELOG.md`, `LICENSE`, `docs/*`, `scripts/fetch-tools.mjs`,
   `src-tauri/src/{paths,media/split}.rs`, `AGENTS.md`.
+
+### 2026-11-14 — v1.1.0: recorte por rango
+- Añadido recorte opcional del video original: inicio/fin con h/m/s, barra visual, marcas desde
+  el reproductor y opción «Usar video completo».
+- La planificación y la ejecución respetan el rango; la numeración de partes empieza en 1 y la
+  estimación de espacio se limita al fragmento seleccionado.
+- Los rangos personalizados usan corte exacto; el modo sin recodificar queda para el video
+  completo y se rechaza por backend si se intenta con un rango.
+- 39 pruebas de backend y 10 de frontend; E2E de rango (10–50 s, 15/15/10) y capturas nuevas.
+- Archivos: `src-tauri/src/{models,media/split,commands/projects}.rs`, `src/lib/api.ts`,
+  `src/pages/ProjectPage.tsx`, `src/components/ui.tsx`, `src/styles/globals.css`,
+  `docs/screenshots/project-range.png`, `README.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/*`.
 
 ### 2026-11-14 — Verificación final y endurecimiento
 - E2E automatizado sobre el binario release: importación, división exacta desde la interfaz,

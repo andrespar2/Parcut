@@ -81,14 +81,16 @@ directorio.
 
 ## 4. Flujo de una división
 
-1. `split_plan(projectId, segundos)` calcula los cortes sin tocar el disco.
-2. `split_start(projectId, segundos, mode)`:
-   - valida rutas y duración;
+1. `split_plan(projectId, segundos, inicio, fin)` calcula los cortes sin tocar el disco.
+2. `split_start(projectId, segundos, mode, inicio, fin)`:
+   - valida rutas, duración y rango (mínimo 2 s, fin posterior al inicio);
+   - si el rango no es el video completo, exige `precise` (los keyframes impiden respetar
+     un inicio/fin arbitrario con `copy`);
    - limpia clips previos (archivos + filas);
    - registra una bandera de cancelación por proyecto;
    - ejecuta FFmpeg:
-     - `copy`: muxer `segment` con `-c copy` y tiempos basados en keyframes;
-     - `precise`: un proceso por parte con `-ss/-t` y codificador H.264 detectado;
+     - `copy`: muxer `segment` con `-c copy` para el video completo;
+     - `precise`: un proceso por parte con `-ss/-t` absolutos y el codificador H.264 detectado;
    - emite `split:progress` leyendo `out_time_us=` de `-progress pipe:1`;
    - mide cada archivo con FFprobe, crea su miniatura e inserta la fila;
    - guarda la duración elegida en el proyecto para futuras divisiones;
@@ -97,8 +99,9 @@ directorio.
      en estado `ready`.
 3. `split:done` o `split:error` cierran la tarea en la UI.
 
-El último clip absorbe el resto; si el resto es menor que 2 s, se fusiona con el anterior para
-evitar fragmentos inútiles.
+El último clip absorbe el resto del rango; si el resto es menor que 2 s, se fusiona con el
+anterior para evitar fragmentos inútiles. La numeración de partes empieza en 1 dentro del
+fragmento seleccionado y el tamaño estimado se calcula proporcionalmente al rango.
 
 ## 5. Cola de publicaciones
 
@@ -149,11 +152,11 @@ El frontend recibe `queue:changed` (instantánea), `queue:progress` (porcentaje 
 |---|---|---|
 | Typecheck + build frontend | `npm run build` | OK |
 | Unitarias frontend | `npm test` | 10/10 |
-| Unitarias backend | `cargo test` | 36/36 |
+| Unitarias backend | `cargo test` | 39/39 |
 | Compilación | `cargo check` | Sin avisos |
-| Release + instalador | `npm run tauri:build` | `parcut.exe` 16,4 MB · instalador 80,50 MiB |
+| Release + instalador | `npm run tauri:build` | `parcut.exe` 16,4 MB · instalador 1.1.0 (80,5 MiB) |
 | Instalación / desinstalación | NSIS `/S` y `uninstall.exe /S` | OK |
-| E2E release (importar, dividir, reproducir, migrar, eliminar) | UI + CDP | OK |
+| E2E release (importar, dividir, recortar, reproducir, migrar, eliminar) | UI + CDP | OK |
 | Metadatos de YouTube | `download_metadata` | OK (8 calidades) |
 | Publicación real | requiere credenciales | Pendiente externo |
 

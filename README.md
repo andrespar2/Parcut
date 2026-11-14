@@ -25,6 +25,11 @@ Desarrollado por **andrespar2**.
 |---|---|
 | ![Configuración](docs/screenshots/settings.png) | ![Configuración clara](docs/screenshots/settings-light.png) |
 
+**Recorte antes de dividir:** elige desde y hasta qué punto del video se generan los clips, con
+barra visual y marcas tomadas directamente del reproductor.
+
+![Recorte por rango](docs/screenshots/project-range.png)
+
 ---
 
 ## Funcionalidades
@@ -37,11 +42,16 @@ Desarrollado por **andrespar2**.
 - Reproductor integrado con controles, volumen y pantalla completa.
 
 ### División automática
+- **Recorte por rango**: elige el punto de inicio y de fin del video original; los clips se
+  generan solo dentro de ese fragmento y la numeración de partes empieza en 1.
+- Marcas de inicio y fin tomadas directamente del reproductor, barra visual del rango y opción
+  para volver al video completo.
 - Duración por partes en horas, minutos y segundos, con valores predeterminados.
 - Estimación previa: número de clips, duración del último fragmento y espacio aproximado.
 - Dos modos de corte:
-  - **Sin recodificar**: instantáneo y sin pérdida, alineado a keyframes.
-  - **Corte exacto**: recodificación H.264/AAC controlada (CRF 20) cuando hace falta precisión.
+  - **Sin recodificar**: instantáneo y sin pérdida, alineado a keyframes (video completo).
+  - **Corte exacto**: recodificación H.264/AAC controlada (CRF 20) para respetar al milisegundo
+    el inicio y el final del rango.
 - Miniaturas automáticas, progreso real, cancelación segura y limpieza de archivos parciales.
 - Clips ordenados por número de parte y persistidos aunque cierres la aplicación.
 
@@ -80,7 +90,7 @@ Desarrollado por **andrespar2**.
 
 ### Instalador (usuario final)
 
-1. Descarga `ParCut_1.0.0_x64-setup.exe` desde la sección de releases.
+1. Descarga `ParCut_1.1.0_x64-setup.exe` desde la sección de releases.
 2. Ejecuta el instalador (instalación por usuario, sin privilegios de administrador).
 3. Abre ParCut desde el menú Inicio o el acceso directo del escritorio.
 
@@ -108,8 +118,9 @@ Consulta [`docs/BUILD.md`](docs/BUILD.md) para el detalle del empaquetado y las 
 ## Cómo se usa
 
 1. **Nuevo proyecto**: pega un enlace autorizado o importa un archivo local.
-2. **Divide**: elige la duración de cada parte (por ejemplo, 1 min 30 s) y pulsa
-   «Crear N clips». El último clip conserva el tiempo restante.
+2. **Divide**: de forma opcional, marca el inicio y el final del fragmento que quieres usar
+   (puedes tomarlos del reproductor) y elige la duración de cada parte (por ejemplo, 1 min 30 s).
+   Pulsa «Crear N clips». El último clip conserva el tiempo restante.
 3. **Revisa**: en el proyecto o en **Mis clips** puedes reproducir, abrir la ubicación, copiar el
    nombre o eliminar cada parte.
 4. **Conecta cuentas**: configura tus credenciales de desarrollador y autoriza las cuentas en
