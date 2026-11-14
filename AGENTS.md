@@ -374,6 +374,7 @@ ejecutable instalado detectó FFmpeg/FFprobe/yt-dlp y `uninstall.exe /S` elimin�
 - Instalación NSIS silenciosa, ejecución del binario instalado y desinstalación comprobadas.
 - Capturas finales en `docs/screenshots/` (oscuro y claro).
 - Pruebas: 36 backend, 10 frontend, `cargo check` sin avisos y build release correcto.
+- `npm audit` sin vulnerabilidades tras actualizar `vitest` 5 y `sharp` 0.35 (solo desarrollo).
 - Archivos: `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/*`, `docs/screenshots/*`,
   `src-tauri/src/{projects,media/split,commands/system}.rs`, `src/pages/*`, `src/components/*`,
   `src/styles/globals.css`.
