@@ -841,6 +841,53 @@ a {
   font-size: 11px;
 }
 
+/* Rango de recorte -------------------------------------------------------- */
+.range-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.range-labels span:nth-child(2) {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.range-track {
+  position: relative;
+  height: 6px;
+  margin: 7px 0 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+}
+
+.range-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: var(--grad);
+  box-shadow: 0 0 12px rgba(110, 231, 255, 0.45);
+}
+
+.range-inputs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.range-inputs .time-input input {
+  width: 100%;
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 /* Badges / pills ---------------------------------------------------------- */
 .pill {
   display: inline-flex;
@@ -1508,6 +1555,11 @@ a {
 
 .field .segmented button {
   flex: 1;
+}
+
+.segmented button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .segmented button svg {

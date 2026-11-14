@@ -132,6 +132,9 @@ pub struct MediaInfo {
 #[serde(rename_all = "camelCase")]
 pub struct SplitPlan {
     pub total_seconds: f64,
+    pub range_start: f64,
+    pub range_end: f64,
+    pub range_seconds: f64,
     pub clip_seconds: f64,
     pub clip_count: usize,
     pub last_clip_seconds: f64,

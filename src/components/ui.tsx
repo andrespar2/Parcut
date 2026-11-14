@@ -115,7 +115,7 @@ export function Segmented<T extends string>({
   onChange,
 }: {
   value: T;
-  options: { value: T; label: string; icon?: ReactNode }[];
+  options: { value: T; label: string; icon?: ReactNode; disabled?: boolean; title?: string }[];
   onChange: (value: T) => void;
 }) {
   return (
@@ -127,6 +127,8 @@ export function Segmented<T extends string>({
           aria-selected={value === option.value}
           className={value === option.value ? "active" : ""}
           onClick={() => onChange(option.value)}
+          disabled={option.disabled}
+          title={option.title}
         >
           {option.icon}
           {option.label}

@@ -59,6 +59,8 @@ export function ProjectPage() {
   const [hours, setHours] = useState(initial.hours);
   const [minutes, setMinutes] = useState(initial.minutes);
   const [seconds, setSeconds] = useState(initial.seconds);
+  const [rangeStart, setRangeStart] = useState(0);
+  const [rangeEnd, setRangeEnd] = useState(0);
   const [mode, setMode] = useState<"copy" | "precise">("copy");
   const [plan, setPlan] = useState<SplitPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -81,8 +83,12 @@ export function ProjectPage() {
     () => partsToSeconds(hours, minutes, seconds),
     [hours, minutes, seconds],
   );
+  const videoDuration = project?.duration ?? 0;
+  const customRange =
+    videoDuration > 0 && (rangeStart > 0.05 || rangeEnd < videoDuration - 0.05);
 
   const activeProject = useRef<string | null>(null);
+  const playerRef = useRef<HTMLVideoElement | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -102,6 +108,8 @@ export function ProjectPage() {
         setHours(parts.hours);
         setMinutes(parts.minutes);
         setSeconds(parts.seconds);
+        setRangeStart(0);
+        setRangeEnd(loadedProject.duration);
         setMode(settings?.preferPreciseCuts ? "precise" : "copy");
         activeProject.current = loadedProject.id;
       }
@@ -167,9 +175,19 @@ export function ProjectPage() {
       setPlan(null);
       return;
     }
+    if (rangeEnd <= rangeStart) {
+      setPlan(null);
+      setPlanError("El punto final del rango debe ser posterior al punto inicial.");
+      return;
+    }
+    if (rangeEnd - rangeStart < 2) {
+      setPlan(null);
+      setPlanError("Selecciona al menos 2 segundos de video para generar clips.");
+      return;
+    }
     const timer = window.setTimeout(() => {
       api
-        .splitPlan(projectId, splitSeconds)
+        .splitPlan(projectId, splitSeconds, rangeStart, rangeEnd)
         .then((value) => {
           setPlan(value);
           setPlanError(null);
@@ -180,14 +198,25 @@ export function ProjectPage() {
         });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [projectId, splitSeconds]);
+  }, [projectId, splitSeconds, rangeStart, rangeEnd]);
+
+  // Un rango personalizado exige corte exacto para respetar los límites.
+  useEffect(() => {
+    if (customRange) setMode("precise");
+  }, [customRange]);
 
   const startSplit = async () => {
     if (!projectId || !plan) return;
     setSplitting(true);
     setSplitProgress({ percent: 0, message: "Preparando la división…" });
     try {
-      const generated = await api.splitStart(projectId, plan.clipSeconds, mode);
+      const generated = await api.splitStart(
+        projectId,
+        plan.clipSeconds,
+        mode,
+        plan.rangeStart,
+        plan.rangeEnd,
+      );
       setClips(generated);
       setSelected(new Set(generated.map((clip) => clip.id)));
       toast(
@@ -216,6 +245,37 @@ export function ProjectPage() {
     } catch (err) {
       toast("error", errorMessage(err));
     }
+  };
+
+  const clampRangeStart = (value: number) => {
+    const maxStart = Math.max(0, Math.min(videoDuration, rangeEnd || videoDuration) - 2);
+    setRangeStart(Math.max(0, Math.min(value, maxStart)));
+  };
+  const clampRangeEnd = (value: number) => {
+    const minEnd = Math.min(videoDuration, rangeStart + 2);
+    setRangeEnd(Math.max(minEnd, Math.min(value, videoDuration)));
+  };
+  const resetRange = () => {
+    setRangeStart(0);
+    setRangeEnd(videoDuration);
+  };
+  const markRangeStart = () => {
+    const current = playerRef.current?.currentTime;
+    if (current === undefined) {
+      toast("info", "Reproduce el video y coloca el cursor en el punto deseado.");
+      return;
+    }
+    clampRangeStart(Math.floor(current * 10) / 10);
+    playerRef.current?.pause();
+  };
+  const markRangeEnd = () => {
+    const current = playerRef.current?.currentTime;
+    if (current === undefined) {
+      toast("info", "Reproduce el video y coloca el cursor en el punto deseado.");
+      return;
+    }
+    clampRangeEnd(Math.ceil(current * 10) / 10);
+    playerRef.current?.pause();
   };
 
   const deleteProject = async () => {
@@ -336,6 +396,10 @@ export function ProjectPage() {
   }
 
   const source = project.originalPath ? convertFileSrc(project.originalPath) : null;
+  const rangeStartPct =
+    videoDuration > 0 ? Math.min(100, Math.max(0, (rangeStart / videoDuration) * 100)) : 0;
+  const rangeEndPct =
+    videoDuration > 0 ? Math.min(100, Math.max(0, (rangeEnd / videoDuration) * 100)) : 0;
   const selectedClips = clips.filter((clip) => selected.has(clip.id));
   const totalSelectedDuration = selectedClips.reduce((sum, clip) => sum + clip.duration, 0);
 
@@ -421,7 +485,14 @@ export function ProjectPage() {
           {source ? (
             <>
               <div className="player-frame">
-                <video key={source} src={source} controls playsInline preload="metadata" />
+                <video
+                  key={source}
+                  ref={playerRef}
+                  src={source}
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
               </div>
               <div className="row wrap" style={{ justifyContent: "space-between", marginTop: 12, gap: 8 }}>
                 <div className="row" style={{ gap: 8, minWidth: 0 }}>
@@ -453,44 +524,109 @@ export function ProjectPage() {
               <Scissors size={16} /> Dividir en clips
             </h3>
             <p className="card-sub" style={{ marginTop: 4 }}>
-              Elige la duración de cada parte. La última conserva el tiempo restante.
+              Recorta el fragmento que te interesa y elige la duración de cada parte.
             </p>
           </div>
 
-          <div className="time-input" aria-label="Duración de cada clip">
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={23}
-              value={hours}
-              onChange={(event) => setHours(Math.max(0, Math.min(23, Number(event.target.value) || 0)))}
-              disabled={splitting}
-              aria-label="Horas"
-            />
-            <span>h</span>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={59}
-              value={minutes}
-              onChange={(event) => setMinutes(Math.max(0, Math.min(59, Number(event.target.value) || 0)))}
-              disabled={splitting}
-              aria-label="Minutos"
-            />
-            <span>min</span>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={59}
-              value={seconds}
-              onChange={(event) => setSeconds(Math.max(0, Math.min(59, Number(event.target.value) || 0)))}
-              disabled={splitting}
-              aria-label="Segundos"
-            />
-            <span>s</span>
+          <div className="field">
+            <div className="row between">
+              <label>Rango del video original</label>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={resetRange}
+                disabled={splitting}
+              >
+                Usar video completo
+              </button>
+            </div>
+            <div className="range-labels">
+              <span>{formatDuration(rangeStart)}</span>
+              <span>{formatDuration(Math.max(0, rangeEnd - rangeStart))} seleccionados</span>
+              <span>{formatDuration(rangeEnd)}</span>
+            </div>
+            <div className="range-track" aria-hidden>
+              <span
+                className="range-fill"
+                style={{
+                  left: `${rangeStartPct}%`,
+                  width: `${Math.max(0, rangeEndPct - rangeStartPct)}%`,
+                }}
+              />
+            </div>
+            <div className="range-inputs">
+              <RangeTimeFields
+                label="Desde"
+                seconds={rangeStart}
+                max={videoDuration}
+                onChange={clampRangeStart}
+                disabled={splitting}
+              />
+              <RangeTimeFields
+                label="Hasta"
+                seconds={rangeEnd}
+                max={videoDuration}
+                onChange={clampRangeEnd}
+                disabled={splitting}
+              />
+            </div>
+            <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+              <button
+                className="btn btn-sm"
+                onClick={markRangeStart}
+                disabled={splitting || !project.originalPath}
+              >
+                Marcar inicio en el reproductor
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={markRangeEnd}
+                disabled={splitting || !project.originalPath}
+              >
+                Marcar fin
+              </button>
+            </div>
+            <span className="field-hint">
+              Los clips se generan solo dentro de este rango y la numeración empieza en 1.
+            </span>
+          </div>
+
+          <div className="field">
+            <label>Duración de cada clip</label>
+            <div className="time-input" aria-label="Duración de cada clip">
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={23}
+                value={hours}
+                onChange={(event) => setHours(Math.max(0, Math.min(23, Number(event.target.value) || 0)))}
+                disabled={splitting}
+                aria-label="Horas"
+              />
+              <span>h</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={59}
+                value={minutes}
+                onChange={(event) => setMinutes(Math.max(0, Math.min(59, Number(event.target.value) || 0)))}
+                disabled={splitting}
+                aria-label="Minutos"
+              />
+              <span>min</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={59}
+                value={seconds}
+                onChange={(event) => setSeconds(Math.max(0, Math.min(59, Number(event.target.value) || 0)))}
+                disabled={splitting}
+                aria-label="Segundos"
+              />
+              <span>s</span>
+            </div>
           </div>
 
           <div className="row wrap" style={{ gap: 6 }}>
@@ -515,7 +651,15 @@ export function ProjectPage() {
             value={mode}
             onChange={setMode}
             options={[
-              { value: "copy", label: "Sin recodificar", icon: <Zap /> },
+              {
+                value: "copy",
+                label: "Sin recodificar",
+                icon: <Zap />,
+                disabled: customRange,
+                title: customRange
+                  ? "El rango personalizado requiere corte exacto"
+                  : "División instantánea sin pérdida",
+              },
               { value: "precise", label: "Corte exacto", icon: <Sparkles /> },
             ]}
           />
@@ -524,9 +668,25 @@ export function ProjectPage() {
               ? "División instantánea sin pérdida de calidad; los cortes se alinean al fotograma clave más cercano."
               : "Recodificación controlada H.264/AAC con CRF 20 para cortes exactos al milisegundo."}
           </p>
+          {customRange ? (
+            <Alert tone="info">
+              Al recortar un rango personalizado se usa «Corte exacto» para respetar el inicio y el
+              final seleccionados. «Sin recodificar» solo está disponible para el video completo.
+            </Alert>
+          ) : null}
 
           {plan ? (
             <div className="card flat col" style={{ gap: 8 }}>
+              <div className="row between">
+                <span className="small">Rango seleccionado</span>
+                <strong className="mono-num">
+                  {formatDuration(plan.rangeStart)} – {formatDuration(plan.rangeEnd)}
+                </strong>
+              </div>
+              <div className="row between">
+                <span className="small">Duración del rango</span>
+                <strong className="mono-num">{formatDuration(plan.rangeSeconds)}</strong>
+              </div>
               <div className="row between">
                 <span className="small">Clips estimados</span>
                 <strong className="mono-num">{plan.clipCount}</strong>
@@ -787,6 +947,69 @@ export function ProjectPage() {
           publicaciones pendientes también se eliminarán.
         </p>
       </Modal>
+    </div>
+  );
+}
+function RangeTimeFields({
+  label,
+  seconds,
+  max,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  seconds: number;
+  max: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}) {
+  const parts = timeParts(seconds);
+  const apply = (h: number, m: number, s: number) => {
+    const total = partsToSeconds(
+      Math.max(0, Math.min(23, h)),
+      Math.max(0, Math.min(59, m)),
+      Math.max(0, Math.min(59, s)),
+    );
+    onChange(Math.min(Math.max(0, max), total));
+  };
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div className="time-input">
+        <input
+          className="input"
+          type="number"
+          min={0}
+          max={23}
+          value={parts.hours}
+          onChange={(event) => apply(Number(event.target.value) || 0, parts.minutes, parts.seconds)}
+          disabled={disabled}
+          aria-label={`${label}: horas`}
+        />
+        <span>h</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          max={59}
+          value={parts.minutes}
+          onChange={(event) => apply(parts.hours, Number(event.target.value) || 0, parts.seconds)}
+          disabled={disabled}
+          aria-label={`${label}: minutos`}
+        />
+        <span>min</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          max={59}
+          value={parts.seconds}
+          onChange={(event) => apply(parts.hours, parts.minutes, Number(event.target.value) || 0)}
+          disabled={disabled}
+          aria-label={`${label}: segundos`}
+        />
+        <span>s</span>
+      </div>
     </div>
   );
 }

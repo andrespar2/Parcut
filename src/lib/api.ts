@@ -103,6 +103,9 @@ export interface SplitBoundary {
 
 export interface SplitPlan {
   totalSeconds: number;
+  rangeStart: number;
+  rangeEnd: number;
+  rangeSeconds: number;
   clipSeconds: number;
   clipCount: number;
   lastClipSeconds: number;
@@ -276,10 +279,15 @@ export const api = {
   clipsList: (projectId: string) => invoke<Clip[]>("clips_list", { projectId }),
   clipDelete: (clipId: string) => invoke<void>("clip_delete", { clipId }),
 
-  splitPlan: (projectId: string, clipSeconds: number) =>
-    invoke<SplitPlan>("split_plan", { projectId, clipSeconds }),
-  splitStart: (projectId: string, clipSeconds: number, mode: "copy" | "precise") =>
-    invoke<Clip[]>("split_start", { projectId, clipSeconds, mode }),
+  splitPlan: (projectId: string, clipSeconds: number, rangeStart: number, rangeEnd: number) =>
+    invoke<SplitPlan>("split_plan", { projectId, clipSeconds, rangeStart, rangeEnd }),
+  splitStart: (
+    projectId: string,
+    clipSeconds: number,
+    mode: "copy" | "precise",
+    rangeStart: number,
+    rangeEnd: number,
+  ) => invoke<Clip[]>("split_start", { projectId, clipSeconds, mode, rangeStart, rangeEnd }),
   splitCancel: (projectId: string) => invoke<void>("split_cancel", { projectId }),
 
   downloadMetadata: (url: string) => invoke<DownloadMetadata>("download_metadata", { url }),

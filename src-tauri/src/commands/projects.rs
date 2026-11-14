@@ -86,7 +86,13 @@ pub fn clip_delete(app: AppHandle, clip_id: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn split_plan(app: AppHandle, project_id: String, clip_seconds: f64) -> AppResult<SplitPlan> {
+pub fn split_plan(
+    app: AppHandle,
+    project_id: String,
+    clip_seconds: f64,
+    range_start: Option<f64>,
+    range_end: Option<f64>,
+) -> AppResult<SplitPlan> {
     let state = app.state::<AppState>();
     let project = {
         let db = state.db();
@@ -96,7 +102,13 @@ pub fn split_plan(app: AppHandle, project_id: String, clip_seconds: f64) -> AppR
     if project.duration <= 0.5 {
         return fail("El video aún no tiene metadatos. Vuelve a importarlo o descárgalo de nuevo.");
     }
-    split::plan_split(project.duration, clip_seconds, project.size_bytes)
+    split::plan_split(
+        project.duration,
+        clip_seconds,
+        project.size_bytes,
+        range_start.unwrap_or(0.0),
+        range_end.unwrap_or(project.duration),
+    )
 }
 
 #[tauri::command]
@@ -105,8 +117,18 @@ pub async fn split_start(
     project_id: String,
     clip_seconds: f64,
     mode: Option<String>,
+    range_start: Option<f64>,
+    range_end: Option<f64>,
 ) -> AppResult<Vec<Clip>> {
-    split::execute(app, project_id, clip_seconds, mode.unwrap_or_else(|| "copy".into())).await
+    split::execute(
+        app,
+        project_id,
+        clip_seconds,
+        mode.unwrap_or_else(|| "copy".into()),
+        range_start,
+        range_end,
+    )
+    .await
 }
 
 #[tauri::command]

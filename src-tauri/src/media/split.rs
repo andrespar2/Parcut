@@ -14,12 +14,16 @@ pub const MAX_CLIP_SECONDS: f64 = 3600.0;
 
 /// Calcula los cortes antes de ejecutar FFmpeg.
 ///
+/// `range_start` y `range_end` recortan el video original: los clips se generan
+/// solo dentro de ese intervalo y la numeración de partes empieza en 1.
 /// Si el resto final es menor que el mínimo, se fusiona con el clip anterior
 /// para evitar fragmentos inservibles.
 pub fn plan_split(
     total_seconds: f64,
     requested_clip_seconds: f64,
     source_bytes: i64,
+    range_start: f64,
+    range_end: f64,
 ) -> AppResult<SplitPlan> {
     if !total_seconds.is_finite() || total_seconds <= 0.5 {
         return fail("El video es demasiado corto para dividirlo.");
@@ -27,44 +31,70 @@ pub fn plan_split(
     if !requested_clip_seconds.is_finite() {
         return fail("La duración del clip no es válida.");
     }
+    let total = round3(total_seconds);
+    let start = round3(if range_start.is_finite() {
+        range_start.clamp(0.0, total)
+    } else {
+        0.0
+    });
+    let end = round3(if range_end.is_finite() {
+        range_end.clamp(0.0, total)
+    } else {
+        total
+    });
+    if end <= start {
+        return fail("El punto final del rango debe ser posterior al punto inicial.");
+    }
+    let range = round3(end - start);
+    if range < MIN_CLIP_SECONDS {
+        return fail(format!(
+            "El rango seleccionado es demasiado corto ({range:.1} s). El mínimo es {MIN_CLIP_SECONDS:.0} s."
+        ));
+    }
     let clip = requested_clip_seconds.clamp(MIN_CLIP_SECONDS, MAX_CLIP_SECONDS);
-    let total = (total_seconds * 1000.0).round() / 1000.0;
 
-    let mut count = (total / clip).ceil().max(1.0) as usize;
-    let mut last = total - clip * (count as f64 - 1.0);
+    let mut count = (range / clip).ceil().max(1.0) as usize;
+    let mut last = range - clip * (count as f64 - 1.0);
     while count > 1 && last < MIN_CLIP_SECONDS {
         count -= 1;
-        last = total - clip * (count as f64 - 1.0);
+        last = range - clip * (count as f64 - 1.0);
     }
     let mut boundaries = Vec::with_capacity(count);
     for index in 0..count {
-        let start = (index as f64 * clip * 1000.0).round() / 1000.0;
-        let end = if index + 1 == count {
-            total
+        let clip_start = round3(start + index as f64 * clip);
+        let clip_end = if index + 1 == count {
+            end
         } else {
-            (((index + 1) as f64 * clip) * 1000.0).round() / 1000.0
+            round3(start + (index + 1) as f64 * clip).min(end)
         };
-        let end = end.min(total);
         boundaries.push(ClipBoundary {
             part: index + 1,
-            start,
-            end,
-            duration: ((end - start) * 1000.0).round() / 1000.0,
+            start: clip_start,
+            end: clip_end,
+            duration: round3(clip_end - clip_start),
         });
     }
     let last_clip_seconds = boundaries.last().map(|b| b.duration).unwrap_or(0.0);
+    let estimated_total_bytes = if total > 0.0 {
+        (source_bytes.max(0) as f64 * range / total).round() as i64
+    } else {
+        0
+    };
     let estimated_clip_bytes = if count > 0 {
-        (source_bytes.max(0) as f64 / count as f64).round() as i64
+        (estimated_total_bytes as f64 / count as f64).round() as i64
     } else {
         0
     };
 
     Ok(SplitPlan {
         total_seconds: total,
+        range_start: start,
+        range_end: end,
+        range_seconds: range,
         clip_seconds: clip,
         clip_count: count,
         last_clip_seconds,
-        estimated_total_bytes: source_bytes.max(0),
+        estimated_total_bytes,
         estimated_clip_bytes,
         boundaries,
     })
@@ -76,13 +106,24 @@ pub async fn execute(
     project_id: String,
     clip_seconds: f64,
     mode: String,
+    range_start: Option<f64>,
+    range_end: Option<f64>,
 ) -> AppResult<Vec<Clip>> {
     AppState::validate_project_id(&project_id)?;
     let cancel = {
         let state = app.state::<AppState>();
         AppState::add_cancel_flag(&state.split_cancels, &project_id)
     };
-    let result = execute_inner(app.clone(), project_id.clone(), clip_seconds, mode, cancel.clone()).await;
+    let result = execute_inner(
+        app.clone(),
+        project_id.clone(),
+        clip_seconds,
+        mode,
+        range_start,
+        range_end,
+        cancel.clone(),
+    )
+    .await;
     {
         let state = app.state::<AppState>();
         AppState::remove_cancel_flag(&state.split_cancels, &project_id);
@@ -95,6 +136,8 @@ async fn execute_inner(
     project_id: String,
     clip_seconds: f64,
     mode: String,
+    range_start: Option<f64>,
+    range_end: Option<f64>,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<Vec<Clip>> {
     let (project, ffmpeg_path, ffprobe_path, encoder) = {
@@ -127,7 +170,20 @@ async fn execute_inner(
         ));
     }
 
-    let plan = plan_split(project.duration, clip_seconds, project.size_bytes)?;
+    let plan = plan_split(
+        project.duration,
+        clip_seconds,
+        project.size_bytes,
+        range_start.unwrap_or(0.0),
+        range_end.unwrap_or(project.duration),
+    )?;
+
+    // Sin recodificar no se puede respetar un inicio/fin arbitrarios (keyframes).
+    if mode == "copy" && (plan.range_start > 0.05 || plan.range_end < plan.total_seconds - 0.05) {
+        return fail(
+            "Para generar clips de un rango personalizado se necesita el modo «Corte exacto». El modo sin recodificar solo está disponible para el video completo.",
+        );
+    }
 
     // Recordar la duración elegida en el proyecto para futuras divisiones.
     {
@@ -314,7 +370,7 @@ async fn split_copy(
 
     let app_handle = app.clone();
     let pid = project_id.to_string();
-    let total = plan.total_seconds;
+    let total = plan.range_seconds;
     ffmpeg::run(ffmpeg_path, &args, total, Some(cancel.clone()), move |percent| {
         let _ = app_handle.emit(
             "split:progress",
@@ -322,7 +378,7 @@ async fn split_copy(
                 "projectId": pid,
                 "percent": percent * 0.85,
                 "stage": "cutting",
-                "message": "Dividiendo el video sin recodificar…",
+                "message": "Recortando y dividiendo el video…",
             }),
         );
     })
@@ -443,7 +499,7 @@ async fn finalize_clips(
 ) -> AppResult<Vec<Clip>> {
     let total = files.len();
     let mut clips: Vec<Clip> = Vec::with_capacity(total);
-    let mut cursor = 0.0f64;
+    let mut cursor = if timeline_from_file { plan.range_start } else { 0.0 };
 
     for (index, file) in files.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
@@ -642,30 +698,63 @@ mod tests {
 
     #[test]
     fn plans_exact_multiples() {
-        let plan = plan_split(900.0, 90.0, 1000).unwrap();
+        let plan = plan_split(900.0, 90.0, 1000, 0.0, 900.0).unwrap();
         assert_eq!(plan.clip_count, 10);
         assert_eq!(plan.last_clip_seconds, 90.0);
         assert_eq!(plan.boundaries.first().unwrap().start, 0.0);
         assert_eq!(plan.boundaries.last().unwrap().end, 900.0);
+        assert_eq!(plan.range_seconds, 900.0);
     }
 
     #[test]
     fn last_clip_keeps_remainder() {
-        let plan = plan_split(900.0, 120.0, 1000).unwrap();
+        let plan = plan_split(900.0, 120.0, 1000, 0.0, 900.0).unwrap();
         assert_eq!(plan.clip_count, 8);
         assert_eq!(plan.last_clip_seconds, 60.0);
     }
 
     #[test]
     fn tiny_remainder_is_merged() {
-        let plan = plan_split(451.0, 90.0, 1000).unwrap();
+        let plan = plan_split(451.0, 90.0, 1000, 0.0, 451.0).unwrap();
         assert_eq!(plan.clip_count, 5);
         assert_eq!(plan.last_clip_seconds, 91.0);
     }
 
     #[test]
+    fn range_limits_clips_and_restarts_numbering() {
+        let plan = plan_split(900.0, 90.0, 10_000, 120.0, 480.0).unwrap();
+        assert_eq!(plan.range_start, 120.0);
+        assert_eq!(plan.range_end, 480.0);
+        assert_eq!(plan.range_seconds, 360.0);
+        assert_eq!(plan.clip_count, 4);
+        assert_eq!(plan.boundaries.first().unwrap().part, 1);
+        assert_eq!(plan.boundaries.first().unwrap().start, 120.0);
+        assert_eq!(plan.boundaries.last().unwrap().end, 480.0);
+        let sum: f64 = plan.boundaries.iter().map(|b| b.duration).sum();
+        assert!((sum - 360.0).abs() < 0.01);
+        // El tamaño estimado se corresponde solo con el rango (40 % del video).
+        assert_eq!(plan.estimated_total_bytes, 4_000);
+    }
+
+    #[test]
+    fn range_remainder_stays_inside_bounds() {
+        let plan = plan_split(600.0, 40.0, 1_000, 95.0, 250.0).unwrap();
+        assert_eq!(plan.boundaries.first().unwrap().start, 95.0);
+        assert_eq!(plan.boundaries.last().unwrap().end, 250.0);
+        let cursor = plan.boundaries.iter().fold(95.0, |_, b| b.end);
+        assert!((cursor - 250.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn range_is_clamped_to_video_duration() {
+        let plan = plan_split(100.0, 30.0, 1000, -10.0, 500.0).unwrap();
+        assert_eq!(plan.range_start, 0.0);
+        assert_eq!(plan.range_end, 100.0);
+    }
+
+    #[test]
     fn clips_cover_the_whole_duration() {
-        let plan = plan_split(613.7, 45.0, 10_000).unwrap();
+        let plan = plan_split(613.7, 45.0, 10_000, 0.0, 613.7).unwrap();
         let mut cursor = 0.0;
         for boundary in &plan.boundaries {
             assert!((boundary.start - cursor).abs() < 0.01);
@@ -678,9 +767,12 @@ mod tests {
 
     #[test]
     fn rejects_invalid_inputs() {
-        assert!(plan_split(0.0, 90.0, 0).is_err());
-        assert!(plan_split(-5.0, 90.0, 0).is_err());
-        assert!(plan_split(100.0, 0.0, 0).is_ok()); // se ajusta al mínimo
+        assert!(plan_split(0.0, 90.0, 0, 0.0, 0.0).is_err());
+        assert!(plan_split(-5.0, 90.0, 0, 0.0, 0.0).is_err());
+        assert!(plan_split(100.0, 0.0, 0, 0.0, 100.0).is_ok()); // se ajusta al mínimo
+        assert!(plan_split(100.0, 10.0, 0, 50.0, 50.0).is_err());
+        assert!(plan_split(100.0, 10.0, 0, 80.0, 40.0).is_err());
+        assert!(plan_split(100.0, 10.0, 0, 10.0, 11.0).is_err());
     }
 
     #[test]
